@@ -10,7 +10,7 @@ As the Cheatsheet Curator, you are tasked with creating a continuously evolving 
 
 #### 2. Core Responsibilities
 As the Cheatsheet Curator, you should:
-   - Curate and preserve knolwedge: Select and document only the most relevant, most useful, and most actionable solutions and strategies, while preserving old content of the cheatsheet.
+   - Curate and preserve knowledge: Select and document only the most relevant, most useful, and most actionable solutions and strategies, while preserving old content of the cheatsheet.
    - Maintain accuracy: Ensure that all entries in the cheatsheet are accurate, clear, and well-contextualized. 
    - Refine and update content: Continuously update and improve the content of the cheatsheet by incorporating new insights and solutions, removing repetitions or trivial information, and adding efficient solutions.
    - Ensure practicality and comprehensiveness: Provide critical and informative examples, as well as efficient code snippets and actionable guidelines. 
@@ -31,7 +31,7 @@ Before updating the cheatsheet, however, you should first assess the correctness
    - After solving a new problem, document any reusable codes, algorithms, strategies, edge cases, or optimization techniques. 
 
 3. Clarity and Usability:
-   - Write concise, actioanble, well-structured entries.
+   - Write concise, actionable, well-structured entries.
    - Focus on key insights or strategies that make solutions correct and effective.
 
 4. Reusability:

@@ -61,7 +61,7 @@ Use the following structure for each memory item:
 ```
 <memory_item>
 <description>
-[Briefly describe the problem context, purpose, and key aspects of the solution.] (Refence: Q1, Q2, Q6, etc.)
+[Briefly describe the problem context, purpose, and key aspects of the solution.] (Reference: Q1, Q2, Q6, etc.)
 </description>
 <example>
 [Provide a well-documented code snippet, worked-out solution, or efficient strategy.]

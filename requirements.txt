@@ -1,0 +1,11 @@
+datasets
+joblib
+litellm
+numpy
+pandas
+pronouncing
+pyphen
+python-dotenv
+scikit-learn
+syllables
+tiktoken

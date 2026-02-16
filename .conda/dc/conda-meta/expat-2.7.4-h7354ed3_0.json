@@ -1,0 +1,52 @@
+{
+  "name": "expat",
+  "version": "2.7.4",
+  "build": "h7354ed3_0",
+  "build_number": 0,
+  "channel": "https://repo.anaconda.com/pkgs/main/linux-64",
+  "subdir": "linux-64",
+  "fn": "expat-2.7.4-h7354ed3_0.conda",
+  "md5": "575218bf09aa99037a6e3bb1f43796a8",
+  "url": "https://repo.anaconda.com/pkgs/main/linux-64/expat-2.7.4-h7354ed3_0.conda",
+  "sha256": "6dc018cce7a88683c5e9b8ed14906ff342e8fee7307205123c588f9775a1b026",
+  "depends": [
+    "__glibc >=2.28,<3.0.a0",
+    "libexpat 2.7.4 h7354ed3_0",
+    "libgcc >=14",
+    "libstdcxx >=14"
+  ],
+  "constrains": [],
+  "license": "MIT",
+  "timestamp": 1770062547000,
+  "size": 25302,
+  "requested_spec": "None",
+  "package_tarball_full_path": "/home/srliu/.conda/pkgs/expat-2.7.4-h7354ed3_0.conda",
+  "extracted_package_dir": "/home/srliu/.conda/pkgs/expat-2.7.4-h7354ed3_0",
+  "files": [
+    "bin/xmlwf",
+    "share/man/man1/xmlwf.1"
+  ],
+  "paths_data": {
+    "paths_version": 1,
+    "paths": [
+      {
+        "_path": "bin/xmlwf",
+        "path_type": "hardlink",
+        "sha256": "31b6ff9d2a3c442d5f5f8c52fcb9f6b1ec03050325ec555df0eb0d014a5f8385",
+        "size_in_bytes": 47104,
+        "sha256_in_prefix": "31b6ff9d2a3c442d5f5f8c52fcb9f6b1ec03050325ec555df0eb0d014a5f8385"
+      },
+      {
+        "_path": "share/man/man1/xmlwf.1",
+        "path_type": "hardlink",
+        "sha256": "825f0d8a1e62cb022543bbc875dec92fbc3dfae874b0b68e481d53190aa96cc7",
+        "size_in_bytes": 11514,
+        "sha256_in_prefix": "825f0d8a1e62cb022543bbc875dec92fbc3dfae874b0b68e481d53190aa96cc7"
+      }
+    ]
+  },
+  "link": {
+    "source": "/home/srliu/.conda/pkgs/expat-2.7.4-h7354ed3_0",
+    "type": 1
+  }
+}

@@ -256,12 +256,12 @@ def main(args: argparse.Namespace):
         embeddings = np.array(embeddings.tolist()) # (N, 1536)
 
         # Re-order the embeddings based on the order of the dataset inputs
-        dataset_inputs = [example["input"] for example in dataset]
+        dataset_inputs = [example["input"] for example in dataset]  # type: ignore[index]
         indices = [questions.index(input) for input in dataset_inputs]
         embeddings = embeddings[indices]
         questions = dataset_inputs
     else:
-        questions = [example["input"] for example in dataset]
+        questions = [example["input"] for example in dataset]  # type: ignore[index]
 
     
     start_idx = len(outputs)
@@ -271,9 +271,9 @@ def main(args: argparse.Namespace):
 
     # Iterate over the dataset
     for idx, example in enumerate(dataset):
-        original_input = dataset[idx]["input"]
-        original_target = dataset[idx]["target"]
-        orig_input = example["input"]
+        original_input = str(dataset[idx]["input"])
+        original_target = str(dataset[idx]["target"])
+        orig_input = example["input"]  # type: ignore[index]
         if args.task in PREDEFINED_PROMPTS:
             input = f"{PREDEFINED_PROMPTS[args.task]}\n\nQuestion #{idx+1}:\n{orig_input}"
         else:
@@ -308,7 +308,7 @@ def main(args: argparse.Namespace):
             allow_code_execution=args.execute_python_code,
             code_execution_flag="EXECUTE CODE!",
             original_input_corpus=questions[:idx+1],
-            original_input_embeddings=embeddings[:idx+1] if args.approach_name in ["Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "FullHistoryAppending"] else None,
+            original_input_embeddings=embeddings[:idx+1] if embeddings is not None and args.approach_name in ["Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "FullHistoryAppending"] else None,  # type: ignore[arg-type]
             generator_outputs_so_far=generator_outputs_so_far,
             retrieve_top_k=args.retrieve_top_k,
         )
@@ -323,7 +323,7 @@ def main(args: argparse.Namespace):
                 **output_dict,
             })
         cheatsheet = output_dict["final_cheatsheet"]
-        final_answer = output_dict["final_answer"]
+        final_answer = str(output_dict["final_answer"])
 
         ## FOR DEBUGGING PURPOSES
         # import pdb; pdb.set_trace()
@@ -339,9 +339,9 @@ def main(args: argparse.Namespace):
         elif args.task in ["AIME_2025", "AIME_2024", "AIME_2020_2024"]:
             result = eval_for_exact_matching_with_no_punctuation(final_answer.lower(), original_target.lower())
         elif args.task in ["GPQA_Diamond", "MMLU_Pro_Engineering", "MMLU_Pro_Physics"]:
-            result = result = eval_for_multiple_choice(input, final_answer, original_target)
+            result = eval_for_multiple_choice(input, final_answer, original_target)
         elif args.task == "MathEquationBalancer":
-            result = eval_equation_balancer(None, final_answer, original_target)
+            result = eval_equation_balancer(original_input, final_answer, original_target)
         else:
             raise ValueError(f"Task {args.task} not supported.")
         

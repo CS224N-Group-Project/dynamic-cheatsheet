@@ -1,6 +1,6 @@
 import numpy as np
 import tiktoken
-from typing import List, Tuple
+from typing import Any, Dict, List
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
 from .utils.extractor import extract_answer, extract_cheatsheet
@@ -102,7 +102,7 @@ class LanguageModel:
             model=self.model_name,
             temperature=temperature,
             max_completion_tokens=max_tokens,
-        ).choices[0].message["content"]
+        ).choices[0].message["content"] # type: ignore
 
         # If Python code execution is allowed, execute the code
         pre_code_execution_flag = output.split(code_execution_flag)[0].strip()
@@ -128,7 +128,7 @@ class LanguageModel:
                     {"role": "assistant", "content": current_output},
                     {"role": "user", "content": f"Proceed with any additional steps required and provide the completed solution. If everything is already complete, type FINAL ANSWER and submit it in the expected format. If you are stucked, please try alternative methods to solve the problem and provide the final solution.{warning_txt}"}
                 ]
-                history += new_messages
+                history += new_messages # type: ignore
                 return self.generate(
                     history=history,
                     temperature=temperature,
@@ -148,23 +148,24 @@ class LanguageModel:
             final_output = f"{final_output}\n\n{output}".strip()
             return final_output
 
-    def advanced_generate(self,
+    def advanced_generate(  # type: ignore[assignment]
+        self,
         approach_name: str,
         input_txt: str,
-        cheatsheet: str = None,
-        generator_template: str = None,
-        cheatsheet_template: str = None,
+        cheatsheet: str = None,  # type: ignore[assignment]
+        generator_template: str = None,  # type: ignore[assignment]
+        cheatsheet_template: str = None,  # type: ignore[assignment]
         temperature: float = 0.0,
         max_tokens: int = 2048,
         max_num_rounds: int = 1,
         allow_code_execution: bool = True,
         code_execution_flag: str = "EXECUTE CODE!",
         add_previous_answers_to_cheatsheet: bool = True,
-        original_input_corpus: List[str] = None,
-        original_input_embeddings: np.ndarray = None,
-        generator_outputs_so_far: List[str] = None,
+        original_input_corpus: List[str] = None,  # type: ignore[assignment]
+        original_input_embeddings: np.ndarray = None,  # type: ignore[assignment]
+        generator_outputs_so_far: List[str] = None,  # type: ignore[assignment]
         retrieve_top_k: int = 3,
-    ) -> Tuple[str, str, str, str]:
+    ) -> Dict[str, Any]:
         """
         Generate a response from the language model.
 
@@ -199,7 +200,7 @@ class LanguageModel:
                 {"role": "user", "content": generator_prompt},
             ]
             generator_output = self.generate(
-                history=generator_history,
+                history=generator_history, # type: ignore
                 temperature=temperature,
                 max_tokens=max_tokens,
                 allow_code_execution=allow_code_execution,
@@ -256,7 +257,7 @@ class LanguageModel:
                 generator_history = [{"role": "user", "content": generator_prompt}]
                 # Run the generator model
                 generator_output = self.generate(
-                    history=generator_history,
+                    history=generator_history, # type: ignore
                     temperature=temperature,
                     max_tokens=max_tokens,
                     allow_code_execution=allow_code_execution,
@@ -270,7 +271,7 @@ class LanguageModel:
 
                 cheatsheet_history = [{"role": "user", "content": cheatsheet_prompt}]
                 cheatsheet_output = self.generate(
-                    history=cheatsheet_history,
+                    history=cheatsheet_history, # type: ignore
                     temperature=temperature,
                     max_tokens=2*max_tokens,
                     allow_code_execution=False,
@@ -295,8 +296,8 @@ class LanguageModel:
                 "input_txt": input_txt,
                 "steps": steps,
                 "previous_answers": previous_answers,
-                "final_answer": generator_answer,
-                "final_cheatsheet": new_cheatsheet,
+                "final_answer": generator_answer, # type: ignore
+                "final_cheatsheet": new_cheatsheet, # type: ignore
                 "final_output": generator_output,
             }
         elif approach_name == "FullHistoryAppending":
@@ -318,7 +319,7 @@ class LanguageModel:
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", curated_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
-                    history=generator_history,
+                    history=generator_history, # type: ignore
                     temperature=temperature,
                     max_tokens=max_tokens,
                     allow_code_execution=allow_code_execution,
@@ -352,7 +353,7 @@ class LanguageModel:
             
             # Retrieve the most similar k input-output pairs from the previous inputs and outputs
             if len(prev_original_input_embeddings) > 0:
-                similarities = cosine_similarity([current_original_input_embedding], prev_original_input_embeddings)
+                similarities = cosine_similarity(np.array([current_original_input_embedding]), prev_original_input_embeddings)
                 top_k_indices = np.argsort(similarities[0])[::-1][:retrieve_top_k]
                 top_k_original_inputs = [original_input_corpus[i] for i in top_k_indices]
                 top_k_original_outputs = [generator_outputs_so_far[i] for i in top_k_indices]
@@ -384,7 +385,7 @@ class LanguageModel:
                 # Now, we are ready to run the cheatsheet curator model
                 cheatsheet_history = [{"role": "user", "content": cheatsheet_prompt}]
                 cheatsheet_output = self.generate(
-                    history=cheatsheet_history,
+                    history=cheatsheet_history, # type: ignore
                     temperature=temperature,
                     max_tokens=2*max_tokens,
                     allow_code_execution=False,
@@ -397,7 +398,7 @@ class LanguageModel:
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", curated_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
-                    history=generator_history,
+                    history=generator_history, # type: ignore
                     temperature=temperature,
                     max_tokens=max_tokens,
                     allow_code_execution=allow_code_execution,

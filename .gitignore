@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 .python-version
 config.env
+CLAUDE.md

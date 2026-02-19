@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import os
+import time
 import pandas as pd
 import numpy as np
 
@@ -33,13 +34,13 @@ class Arguments(Tap):
     cheatshet_prompt_path: str = None
 
     # Additional model-related arguments
-    max_tokens: int = 2048
+    max_tokens: int = 4096
     temperature: float = 0.0
     max_num_rounds: int = 1
 
     execute_python_code: bool = True
     initialize_cheatsheet_path: str = None
-    retrieve_top_k: int = 3
+    retrieve_top_k: int = 10
 
     # Continue from the previous run
     continue_from_last_run_path: str = None
@@ -160,7 +161,19 @@ def main(args: Arguments):
 
         # Load the previous cheatsheet from the last output
         cheatsheet = outputs[-1]["final_cheatsheet"]
-        
+
+        # For StrategicChunkRetrieval: re-embed all memory items (JSONL stores text-only, no embeddings)
+        if args.approach_name == "DynamicCheatsheet_StrategicChunkRetrieval" and cheatsheet not in (None, "(empty)"):
+            try:
+                store = json.loads(cheatsheet)
+                print(f"Re-embedding {len(store)} memory items from previous run...")
+                for item in store:
+                    item["embedding"] = model._embed_text(item["text"])
+                cheatsheet = json.dumps(store)
+                print("Re-embedding complete.")
+            except Exception as e:
+                print(f"Warning: Could not re-embed memory store on continue: {e}")
+
         generator_outputs_so_far = [output["final_output"] for output in outputs]
 
         # Print the details
@@ -247,18 +260,23 @@ def main(args: Arguments):
         generator_outputs_so_far.append(output_dict["final_output"])
 
 
+        # For StrategicChunkRetrieval: pop the embeddings-bearing version before saving to JSONL.
+        # Use it as the carry-forward cheatsheet so retrieval works next iteration.
+        # For all other approaches: falls back to the text-only final_cheatsheet.
+        cheatsheet = output_dict.pop("final_cheatsheet_with_embeddings", output_dict["final_cheatsheet"])
+
         outputs.append({
                 "input": input,
                 "target": original_target,
                 "raw_input": original_input,
-                **output_dict,
+                **output_dict,  # final_cheatsheet_with_embeddings already popped — not saved to JSONL
             })
-        cheatsheet = output_dict["final_cheatsheet"]
         final_answer = output_dict["final_answer"]
 
         ## FOR DEBUGGING PURPOSES
         # import pdb; pdb.set_trace()
-        print(f"@ CHEATSHEET:\n{cheatsheet}")
+        cheatsheet_display = output_dict.get("memory_store_text", cheatsheet)  # Added by Jerry Gu: use embedding-free display for StrategicChunkRetrieval
+        print(f"@ CHEATSHEET:\n{cheatsheet_display}")
         print('- ' * 50)
         print(f"Input: {input}")        
         print(f"Target: {original_target}")
@@ -285,6 +303,7 @@ def main(args: Arguments):
 
         # Temporarily save the outputs to a file after each example
         write_jsonl(args.save_path_name, outputs)
+        time.sleep(20)  # avoid TPM rate limits (Added by Jerry)
 
         if args.max_n_samples > 0 and idx == args.max_n_samples - 1:
             break

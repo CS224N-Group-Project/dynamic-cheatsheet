@@ -25,7 +25,6 @@ ARGUMENT_FIELDS = [
     "execute_python_code",
     "initialize_cheatsheet_path",
     "retrieve_top_k",
-    "continue_from_last_run_path",
     "save_directory",
     "additional_flag_for_save_path",
     "max_n_samples",
@@ -66,7 +65,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retrieve_top_k", type=int, default=3)
     parser.add_argument("--prob", type=float, default=None,
                         help="If set, use softmax(confidence*similarity) to select entries whose cumulative probability exceeds this threshold (e.g. 0.9) instead of top-k.")
-    parser.add_argument("--continue_from_last_run_path", default=None)
     parser.add_argument("--save_directory", default="experiments")
     parser.add_argument("--additional_flag_for_save_path", default="")
     parser.add_argument("--max_n_samples", type=int, default=-1)
@@ -172,21 +170,26 @@ def main(args: argparse.Namespace):
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
     
-    # If the previous run parameter is provided, make sure that the provided arguments are consistent with those found in the previous run
-    if args.continue_from_last_run_path:
-        if not os.path.exists(args.continue_from_last_run_path):
-            raise ValueError(f"The provided path {args.continue_from_last_run_path} does not exist.")
-        
-        # Read the previous run parameters from the previous run file and compare them with the provided arguments
-        previous_run_param_path = args.continue_from_last_run_path.replace(".jsonl", "_params.json")
-        # Read the previous run parameters
-        with open(previous_run_param_path, "r") as file:
+    # Build the deterministic save path (always, up front)
+    _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval"}
+    retrieval_tag = ""
+    if args.approach_name in _retrieval_approaches:
+        retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
+    _safe_model_name = args.model_name.replace("/", "-")
+    _flag = f"_{args.additional_flag_for_save_path}" if args.additional_flag_for_save_path else ""
+    args.save_path_name = f"{args.save_directory}/{args.task}/{_safe_model_name}_{args.approach_name}{retrieval_tag}{_flag}.jsonl"
+    os.makedirs(os.path.dirname(args.save_path_name), exist_ok=True)
+
+    save_param_path = args.save_path_name.replace(".jsonl", "_params.json")
+
+    # Auto-resume if a prior partial run exists
+    _is_resume = os.path.exists(args.save_path_name)
+    if _is_resume and os.path.exists(save_param_path):
+        with open(save_param_path, "r") as file:
             previous_run_params = json.load(file)
 
-        # Compare the provided arguments with the previous run parameters
+        # Validate that key params are consistent with the previous run
         args_keys = ["generator_prompt_path", "cheatsheet_prompt_path", "temperature", "execute_python_code", "task", "model_name", "approach_name", "max_num_rounds"]
-
-        # Compare the provided arguments with the previous run parameters
         for key in args_keys:
             if key == "cheatsheet_prompt_path":
                 if "cheatsheet_prompt_path" in previous_run_params:
@@ -199,54 +202,46 @@ def main(args: argparse.Namespace):
                 if key not in previous_run_params:
                     raise ValueError(f"Warning: The provided argument {key} could not be found in the previous run metadata.")
                 prev_value = previous_run_params[key]
-
             if getattr(args, key) != prev_value:
                 raise ValueError(f"Warning: The provided argument {key} is inconsistent with the previous run. The previous run value is {prev_value}.")
-        
-        # Create a new save path name based on the previous run path
-        args.save_path_name = args.continue_from_last_run_path.replace(".jsonl", "_continued.jsonl")
-    else:
-        # Create a new save path name based on the current time stamp
-        time_stamp = datetime.today().strftime('%Y-%m-%d-%H-%M')
-        _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval"}
-        retrieval_tag = ""
-        if args.approach_name in _retrieval_approaches:
-            retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
-        args.save_path_name = f"{args.save_directory}/{args.task}/{args.model_name}_{args.approach_name}_{time_stamp}{retrieval_tag}_{args.additional_flag_for_save_path}.jsonl"
-        
-        # Create the directory if it does not exist
-        dir_path = os.path.dirname(args.save_path_name)
-        os.makedirs(dir_path, exist_ok=True)
 
-    save_param_path = args.save_path_name.replace(".jsonl", "_params.json")
-    dir_path = os.path.dirname(save_param_path)
-    os.makedirs(dir_path, exist_ok=True)
-    
-    # Save the arguments to a file
+    # Save the arguments to a file (run_timestamp records when this run started/resumed)
     with open(save_param_path, "w") as file:
-        json.dump(args_to_dict(args), file, indent=4)
+        json.dump({**args_to_dict(args), "run_timestamp": datetime.today().strftime('%Y-%m-%d-%H-%M')}, file, indent=4)
 
     # Initialize the cheatsheet
     cheatsheet = "(empty)"
     if args.initialize_cheatsheet_path is not None:
         with open(args.initialize_cheatsheet_path, "r") as file:
             cheatsheet = file.read()
-    
+
     # Initialize the outputs and the generator outputs so far
     outputs = []
     generator_outputs_so_far = []
-    if args.continue_from_last_run_path:
+    if _is_resume:
         # Load the previous run
-        with open(args.continue_from_last_run_path, "r") as file:
+        with open(args.save_path_name, "r") as file:
             outputs = [json.loads(line) for line in file.readlines()]
 
         # Load the previous cheatsheet from the last output
         cheatsheet = outputs[-1]["final_cheatsheet"]
-        
+
+        # Re-embed memory store on resume (StrategicChunkRetrieval stores source_input, not embeddings, on disk)
+        if args.approach_name == "DynamicCheatsheet_StrategicChunkRetrieval" and cheatsheet not in (None, "(empty)"):
+            try:
+                _resume_store = json.loads(cheatsheet)
+            except Exception:
+                _resume_store = []
+            if _resume_store:
+                print(f"Re-embedding {len(_resume_store)} memory items for resume...")
+                for _item in _resume_store:
+                    _item["embedding"] = model._embed_text(_item["text"])
+                cheatsheet = json.dumps(_resume_store)
+
         generator_outputs_so_far = [output["final_output"] for output in outputs]
 
         # Print the details
-        print(f"Continuing from the previous run at {args.continue_from_last_run_path}.")
+        print(f"Continuing from the previous run at {args.save_path_name}.")
         print(f"Loaded {len(outputs)} examples from the previous run.")
         print(f"Most recent cheatsheet: {cheatsheet}")
         print("-" * 50)
@@ -389,7 +384,7 @@ def main(args: argparse.Namespace):
         elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
             problem_type = dataset[idx]["type"]
             choices_json = dataset[idx]["choices"]
-            result = eval_for_ineqmath(problem_type, final_answer, original_target, choices_json)
+            result = eval_for_ineqmath(problem_type, final_answer, original_target, choices_json, args.model_name)
         else:
             raise ValueError(f"Task {args.task} not supported.")
         

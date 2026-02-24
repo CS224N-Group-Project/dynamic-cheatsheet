@@ -324,7 +324,7 @@ def _clean_bound_expr(expr: str) -> str:
     return expr.strip()
 
 
-def _verify_bound_with_llm(prediction: str, ground_truth: str) -> bool:
+def _verify_bound_with_llm(prediction: str, ground_truth: str, model: str = "openai/gpt-4o-mini") -> bool:
     """Use an LLM to check mathematical equivalence of two bound expressions."""
     from litellm import completion as litellm_completion
 
@@ -333,7 +333,7 @@ def _verify_bound_with_llm(prediction: str, ground_truth: str) -> bool:
     )
     try:
         resp = litellm_completion(
-            model="openai/gpt-4o-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=32,
@@ -349,6 +349,7 @@ def eval_for_ineqmath(
     output: str,
     target: str,
     choices_json: str = "",
+    model: str = "openai/gpt-4o-mini",
 ) -> bool:
     """
     Evaluate an IneqMath answer.
@@ -385,7 +386,7 @@ def eval_for_ineqmath(
         return True
 
     # LLM equivalence check
-    return _verify_bound_with_llm(pred_clean, target_clean)
+    return _verify_bound_with_llm(pred_clean, target_clean, model)
 
 
 def eval_for_pyton_programming_puzzles(input: str, output: str) -> bool:

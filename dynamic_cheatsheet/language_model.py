@@ -598,6 +598,7 @@ class LanguageModel:
                 memory_store.append({
                     "id": next_id,
                     "text": item_text,
+                    "source_input": input_txt,
                     "embedding": self._embed_text(item_text),
                     "count": 1,
                 })
@@ -606,7 +607,7 @@ class LanguageModel:
             # Serialize two versions of the memory store:
             # - final_cheatsheet: text-only JSON (no embeddings) — saved to JSONL
             # - final_cheatsheet_with_embeddings: full JSON with embeddings — in-memory carry-forward only
-            memory_store_clean = [{"id": item["id"], "text": item["text"], "count": item["count"]} for item in memory_store]
+            memory_store_clean = [{"id": item["id"], "text": item["text"], "source_input": item["source_input"], "count": item["count"]} for item in memory_store]
             new_cheatsheet = json.dumps(memory_store_clean)
             new_cheatsheet_with_embeddings = json.dumps(memory_store)
             memory_store_text = "\n\n".join(item["text"] for item in memory_store) if memory_store else "(empty)"

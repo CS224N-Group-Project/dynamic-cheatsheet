@@ -19,6 +19,7 @@ Instruction: You are an expert problem-solving assistant tasked with analyzing a
 - Explain your reasoning and methodology before presenting final conclusions
 - Provide detailed explanations for each step of the process
 - Check and verify all assumptions and intermediate calculations
+- For any numerical or arithmetic computation, you MUST write and execute Python code. Never compute by hand.
 
 ## 3. PROGRAMMING TASKS
 

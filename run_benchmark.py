@@ -1,55 +1,84 @@
+import argparse
 from datetime import datetime
 import json
 import os
-import time
-import pandas as pd
-import numpy as np
-
-from datasets import load_dataset, load_from_disk
-from tap import Tap
-from dynamic_cheatsheet.language_model import LanguageModel
-from dynamic_cheatsheet.utils.evaluation import eval_for_GameOf24, eval_for_multiple_choice, eval_for_exact_matching_with_no_punctuation, eval_equation_balancer
-
-from dotenv import load_dotenv
+import sys
 
 PREDEFINED_PROMPTS = {
     "GameOf24": f"Let's play a game called 24. You'll be given four integers, and your objective is to use each number only once, combined with any of the four arithmetic operations (addition, subtraction, multiplication, and division) and parentheses, to achieve a total of 24. For example, if the input is 4, 7, 8, and 8, the output could be (7 - (8 / 8)) * 4 = 24. Please present a single expression that evaluates to 24.",
 }
 
-class Arguments(Tap):
+CLI_ALIASES = {
+    "--approach": "--approach_name",
+    "--cheatshet_prompt_path": "--cheatsheet_prompt_path",
+}
+
+ARGUMENT_FIELDS = [
+    "task",
+    "approach_name",
+    "model_name",
+    "generator_prompt_path",
+    "cheatsheet_prompt_path",
+    "max_tokens",
+    "temperature",
+    "max_num_rounds",
+    "execute_python_code",
+    "initialize_cheatsheet_path",
+    "retrieve_top_k",
+    "continue_from_last_run_path",
+    "save_directory",
+    "additional_flag_for_save_path",
+    "max_n_samples",
+    "no_shuffle",
+    "prob",
+]
+
+
+def str_to_bool(value: str) -> bool:
     """
-    Arguments to the pass to the program.
+    Parse common boolean text values.
     """
-    # Task name
-    task: str = "GameOf24"
-    
-    # Approach name
-    approach_name: str = "DynamicCheatsheet_Cumulative"
+    if isinstance(value, bool):
+        return value
+    value = value.lower().strip()
+    if value in {"1", "true", "t", "yes", "y"}:
+        return True
+    if value in {"0", "false", "f", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
-    # Model name
-    model_name: str = "openai/gpt-4o-mini"
 
-    # Paths to the prompt files
-    generator_prompt_path: str = "prompts/simple_generator.txt"
-    cheatshet_prompt_path: str = None
+def build_argument_parser() -> argparse.ArgumentParser:
+    """
+    Build the CLI parser for benchmark runs.
+    """
+    parser = argparse.ArgumentParser(description="Run Dynamic Cheatsheet benchmarks.")
+    parser.add_argument("--task", default="GameOf24")
+    parser.add_argument("--approach_name", default="DynamicCheatsheet_Cumulative")
+    parser.add_argument("--model_name", default="openai/gpt-4o-mini")
+    parser.add_argument("--generator_prompt_path", default="prompts/generator_prompt.txt")
+    parser.add_argument("--cheatsheet_prompt_path", default=None)
+    parser.add_argument("--max_tokens", type=int, default=2048)
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--max_num_rounds", type=int, default=1)
+    parser.add_argument("--execute_python_code", type=str_to_bool, nargs="?", const=True, default=True)
+    parser.add_argument("--initialize_cheatsheet_path", default=None)
+    parser.add_argument("--retrieve_top_k", type=int, default=3)
+    parser.add_argument("--prob", type=float, default=None,
+                        help="If set, use softmax(confidence*similarity) to select entries whose cumulative probability exceeds this threshold (e.g. 0.9) instead of top-k.")
+    parser.add_argument("--continue_from_last_run_path", default=None)
+    parser.add_argument("--save_directory", default="experiments")
+    parser.add_argument("--additional_flag_for_save_path", default="")
+    parser.add_argument("--max_n_samples", type=int, default=-1)
+    parser.add_argument("--no_shuffle", type=str_to_bool, nargs="?", const=True, default=False)
+    return parser
 
-    # Additional model-related arguments
-    max_tokens: int = 4096
-    temperature: float = 0.0
-    max_num_rounds: int = 1
 
-    execute_python_code: bool = True
-    initialize_cheatsheet_path: str = None
-    retrieve_top_k: int = 10
-
-    # Continue from the previous run
-    continue_from_last_run_path: str = None
-
-    # Additional save-path-related arguments
-    save_directory: str = "results"
-    additional_flag_for_save_path: str = ""
-    max_n_samples: int = -1
-    no_shuffle: bool = False
+def args_to_dict(args: argparse.Namespace) -> dict:
+    """
+    Convert parsed args into a stable, serializable dict.
+    """
+    return {field: getattr(args, field) for field in ARGUMENT_FIELDS}
 
 
 def read_file(file_path: str) -> str:
@@ -72,27 +101,63 @@ def write_jsonl(file_path, data):
             file.write(json.dumps(line) + "\n")
 
 
-def main(args: Arguments):
+def normalize_cli_args(argv):
+    """
+    Normalize CLI aliases so docs and legacy flags both work.
+    """
+    normalized = []
+    for arg in argv:
+        if "=" in arg and arg.startswith("--"):
+            key, value = arg.split("=", 1)
+            normalized_key = CLI_ALIASES.get(key, key)
+            normalized.append(f"{normalized_key}={value}")
+        else:
+            normalized.append(CLI_ALIASES.get(arg, arg))
+    return normalized
+
+
+def main(args: argparse.Namespace):
     """
     Main function to run the benchmark.
     """
+    try:
+        import pandas as pd
+        import numpy as np
+        from datasets import load_dataset, load_from_disk
+        from dotenv import load_dotenv
+        from dynamic_cheatsheet.language_model import LanguageModel
+        from dynamic_cheatsheet.utils.evaluation import (
+            eval_equation_balancer,
+            eval_for_exact_matching_with_no_punctuation,
+            eval_for_GameOf24,
+            eval_for_ineqmath,
+            eval_for_multiple_choice,
+        )
+    except ModuleNotFoundError as exc:
+        missing = exc.name or "a required package"
+        raise ModuleNotFoundError(
+            f"Missing dependency '{missing}'. Install dependencies with: pip install -r requirements.txt"
+        ) from exc
+
     # Load the environment variables
     load_dotenv("config.env")
 
     # Read the prompt files
     args.generator_prompt = read_file(args.generator_prompt_path)
-    if args.cheatshet_prompt_path:
-        args.cheatsheet_prompt = read_file(args.cheatshet_prompt_path)
+    if args.cheatsheet_prompt_path:
+        args.cheatsheet_prompt = read_file(args.cheatsheet_prompt_path)
     else:
         args.cheatsheet_prompt = "(empty)"
-
-    args.max_n_samples = int(args.max_n_samples)
-
 
     # Initialize the language model
     model = LanguageModel(
         model_name=args.model_name,
     )
+
+    # Load self-correction template if using a self-correction approach
+    if args.approach_name in ["DynamicCheatsheet_SelfCorrection", "DynamicCheatsheet_SelfCorrection_Improved", "self-correction-improved"]:
+        self_correction_path = os.path.join(os.path.dirname(__file__), "prompts", "self_correction_prompt.txt")
+        model._self_correction_template = read_file(self_correction_path)
 
     # Add a flag to the save path if the code execution is not allowed
     if not args.execute_python_code:
@@ -102,7 +167,7 @@ def main(args: Arguments):
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
-    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer"]:
+    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev"]:
         dataset = load_from_disk(f"data/{args.task}")
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
@@ -119,19 +184,35 @@ def main(args: Arguments):
             previous_run_params = json.load(file)
 
         # Compare the provided arguments with the previous run parameters
-        args_keys = ["generator_prompt_path", "cheatshet_prompt_path", "temperature", "execute_python_code", "task", "model_name", "approach_name", "max_num_rounds"]
+        args_keys = ["generator_prompt_path", "cheatsheet_prompt_path", "temperature", "execute_python_code", "task", "model_name", "approach_name", "max_num_rounds"]
 
         # Compare the provided arguments with the previous run parameters
         for key in args_keys:
-            if getattr(args, key) != previous_run_params[key]:
-                raise ValueError(f"Warning: The provided argument {key} is inconsistent with the previous run. The previous run value is {previous_run_params[key]}.")
+            if key == "cheatsheet_prompt_path":
+                if "cheatsheet_prompt_path" in previous_run_params:
+                    prev_value = previous_run_params["cheatsheet_prompt_path"]
+                elif "cheatshet_prompt_path" in previous_run_params:
+                    prev_value = previous_run_params["cheatshet_prompt_path"]
+                else:
+                    raise ValueError(f"Warning: The provided argument {key} could not be found in the previous run metadata.")
+            else:
+                if key not in previous_run_params:
+                    raise ValueError(f"Warning: The provided argument {key} could not be found in the previous run metadata.")
+                prev_value = previous_run_params[key]
+
+            if getattr(args, key) != prev_value:
+                raise ValueError(f"Warning: The provided argument {key} is inconsistent with the previous run. The previous run value is {prev_value}.")
         
         # Create a new save path name based on the previous run path
         args.save_path_name = args.continue_from_last_run_path.replace(".jsonl", "_continued.jsonl")
     else:
         # Create a new save path name based on the current time stamp
         time_stamp = datetime.today().strftime('%Y-%m-%d-%H-%M')
-        args.save_path_name = f"{args.save_directory}/{args.task}/{args.model_name}_{args.approach_name}_{time_stamp}_{args.additional_flag_for_save_path}.jsonl"
+        _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval"}
+        retrieval_tag = ""
+        if args.approach_name in _retrieval_approaches:
+            retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
+        args.save_path_name = f"{args.save_directory}/{args.task}/{args.model_name}_{args.approach_name}_{time_stamp}{retrieval_tag}_{args.additional_flag_for_save_path}.jsonl"
         
         # Create the directory if it does not exist
         dir_path = os.path.dirname(args.save_path_name)
@@ -143,7 +224,7 @@ def main(args: Arguments):
     
     # Save the arguments to a file
     with open(save_param_path, "w") as file:
-        json.dump(args.as_dict(), file, indent=4)
+        json.dump(args_to_dict(args), file, indent=4)
 
     # Initialize the cheatsheet
     cheatsheet = "(empty)"
@@ -161,19 +242,7 @@ def main(args: Arguments):
 
         # Load the previous cheatsheet from the last output
         cheatsheet = outputs[-1]["final_cheatsheet"]
-
-        # For StrategicChunkRetrieval: re-embed all memory items (JSONL stores text-only, no embeddings)
-        if args.approach_name == "DynamicCheatsheet_StrategicChunkRetrieval" and cheatsheet not in (None, "(empty)"):
-            try:
-                store = json.loads(cheatsheet)
-                print(f"Re-embedding {len(store)} memory items from previous run...")
-                for item in store:
-                    item["embedding"] = model._embed_text(item["text"])
-                cheatsheet = json.dumps(store)
-                print("Re-embedding complete.")
-            except Exception as e:
-                print(f"Warning: Could not re-embed memory store on continue: {e}")
-
+        
         generator_outputs_so_far = [output["final_output"] for output in outputs]
 
         # Print the details
@@ -192,7 +261,14 @@ def main(args: Arguments):
     # Initialize the questions and the embeddings
     questions = None
     embeddings = None
-    if args.approach_name in ["Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "FullHistoryAppending"]:
+    if args.approach_name in [
+        "Dynamic_Retrieval",
+        "DynamicCheatsheet_RetrievalSynthesis",
+        "FullHistoryAppending",
+        "DynamicCheatsheet_SelfCorrection",
+        "DynamicCheatsheet_SelfCorrection_Improved",
+        "self-correction-improved",
+    ]:
         df = pd.read_csv(f"embeddings/{args.task}.csv")
         questions = df["input"].tolist()
         embeddings = df["embedding"]
@@ -200,12 +276,12 @@ def main(args: Arguments):
         embeddings = np.array(embeddings.tolist()) # (N, 1536)
 
         # Re-order the embeddings based on the order of the dataset inputs
-        dataset_inputs = [example["input"] for example in dataset]
+        dataset_inputs = [example["input"] for example in dataset]  # type: ignore[index]
         indices = [questions.index(input) for input in dataset_inputs]
         embeddings = embeddings[indices]
         questions = dataset_inputs
     else:
-        questions = [example["input"] for example in dataset]
+        questions = [example["input"] for example in dataset]  # type: ignore[index]
 
     
     start_idx = len(outputs)
@@ -215,9 +291,9 @@ def main(args: Arguments):
 
     # Iterate over the dataset
     for idx, example in enumerate(dataset):
-        original_input = dataset[idx]["input"]
-        original_target = dataset[idx]["target"]
-        orig_input = example["input"]
+        original_input = str(dataset[idx]["input"])
+        original_target = str(dataset[idx]["target"])
+        orig_input = example["input"]  # type: ignore[index]
         if args.task in PREDEFINED_PROMPTS:
             input = f"{PREDEFINED_PROMPTS[args.task]}\n\nQuestion #{idx+1}:\n{orig_input}"
         else:
@@ -231,6 +307,16 @@ def main(args: Arguments):
         elif args.task == "MathEquationBalancer":
             # Add a specific format to the input for the MathEquationBalancer task
             input = f"Below is an equation with missing operators. Your task is to fill in the blanks with the correct mathematical operators: +, -, *, or /. Ensure that the equation is correct once the operators are added. The operators should be placed in the sequence they appear from left to right. Include the full equation with the operators filled in. For instance, for the equation 1 ? 2 ? 3 = 6, the correct answer is 1 + 2 + 3 = 6.\n\nEquation: {input}"
+        elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
+            problem_type = dataset[idx]["type"]
+            if problem_type == "relation":
+                import json as _json
+                choices_raw = dataset[idx]["choices"]
+                choices = _json.loads(choices_raw) if choices_raw else []
+                choices_str = "\n".join(choices) if choices else ""
+                input = f"{input}\n\nChoices:\n{choices_str}\n\n(Select the correct relation from the choices above. State your final answer as the choice letter, e.g. (A).)"
+            else:
+                input = f"{input}\n\n(Provide your final answer as the exact value of the constant, e.g. C = 4.)"
 
         # Skip the examples that have been already seen in the previous run
         if idx < start_idx:
@@ -252,31 +338,40 @@ def main(args: Arguments):
             allow_code_execution=args.execute_python_code,
             code_execution_flag="EXECUTE CODE!",
             original_input_corpus=questions[:idx+1],
-            original_input_embeddings=embeddings[:idx+1] if args.approach_name in ["Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "FullHistoryAppending"] else None,
+            original_input_embeddings=embeddings[:idx+1] if embeddings is not None and args.approach_name in [
+                "Dynamic_Retrieval",
+                "DynamicCheatsheet_RetrievalSynthesis",
+                "FullHistoryAppending",
+                "DynamicCheatsheet_StrategicChunkRetrieval",
+            ] else None,  # type: ignore[arg-type]
             generator_outputs_so_far=generator_outputs_so_far,
             retrieve_top_k=args.retrieve_top_k,
+            retrieve_prob=args.prob,
         )
 
         generator_outputs_so_far.append(output_dict["final_output"])
 
 
-        # For StrategicChunkRetrieval: pop the embeddings-bearing version before saving to JSONL.
-        # Use it as the carry-forward cheatsheet so retrieval works next iteration.
-        # For all other approaches: falls back to the text-only final_cheatsheet.
-        cheatsheet = output_dict.pop("final_cheatsheet_with_embeddings", output_dict["final_cheatsheet"])
+        # Pop the embeddings-bearing cheatsheet before saving — it carries forward in memory only
+        cheatsheet_with_embeddings = output_dict.pop("final_cheatsheet_with_embeddings", None)
 
-        outputs.append({
+        output_record = {
                 "input": input,
                 "target": original_target,
                 "raw_input": original_input,
-                **output_dict,  # final_cheatsheet_with_embeddings already popped — not saved to JSONL
-            })
-        final_answer = output_dict["final_answer"]
+                **output_dict,
+            }
+        # Save extra metadata for IneqMath leaderboard submission
+        if args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
+            output_record["data_id"] = dataset[idx]["data_id"]
+            output_record["problem_type"] = dataset[idx]["type"]
+        outputs.append(output_record)
+        cheatsheet = cheatsheet_with_embeddings if cheatsheet_with_embeddings is not None else output_dict["final_cheatsheet"]
+        final_answer = str(output_dict["final_answer"])
 
         ## FOR DEBUGGING PURPOSES
         # import pdb; pdb.set_trace()
-        cheatsheet_display = output_dict.get("memory_store_text", cheatsheet)  # Added by Jerry Gu: use embedding-free display for StrategicChunkRetrieval
-        print(f"@ CHEATSHEET:\n{cheatsheet_display}")
+        print(f"@ CHEATSHEET:\n{cheatsheet}")
         print('- ' * 50)
         print(f"Input: {input}")        
         print(f"Target: {original_target}")
@@ -288,9 +383,13 @@ def main(args: Arguments):
         elif args.task in ["AIME_2025", "AIME_2024", "AIME_2020_2024"]:
             result = eval_for_exact_matching_with_no_punctuation(final_answer.lower(), original_target.lower())
         elif args.task in ["GPQA_Diamond", "MMLU_Pro_Engineering", "MMLU_Pro_Physics"]:
-            result = result = eval_for_multiple_choice(input, final_answer, original_target)
+            result = eval_for_multiple_choice(input, final_answer, original_target)
         elif args.task == "MathEquationBalancer":
-            result = eval_equation_balancer(None, final_answer, original_target)
+            result = eval_equation_balancer(original_input, final_answer, original_target)
+        elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
+            problem_type = dataset[idx]["type"]
+            choices_json = dataset[idx]["choices"]
+            result = eval_for_ineqmath(problem_type, final_answer, original_target, choices_json)
         else:
             raise ValueError(f"Task {args.task} not supported.")
         
@@ -303,7 +402,6 @@ def main(args: Arguments):
 
         # Temporarily save the outputs to a file after each example
         write_jsonl(args.save_path_name, outputs)
-        time.sleep(20)  # avoid TPM rate limits (Added by Jerry)
 
         if args.max_n_samples > 0 and idx == args.max_n_samples - 1:
             break
@@ -313,5 +411,7 @@ def main(args: Arguments):
 
         
 if __name__ == "__main__":
-    args = Arguments().parse_args()
+    parser = build_argument_parser()
+    normalized_argv = normalize_cli_args(sys.argv[1:])
+    args = parser.parse_args(normalized_argv)
     main(args)

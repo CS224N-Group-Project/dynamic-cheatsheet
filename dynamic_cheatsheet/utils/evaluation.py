@@ -266,6 +266,128 @@ def eval_for_multiple_choice(input_text: str, final_answer: str, target: str) ->
     return False
 
 
+## ---------------------------------------------------------------------------
+## IneqMath evaluation helpers
+## ---------------------------------------------------------------------------
+
+_BOUND_VERIFY_PROMPT = """You are a mathematical equivalence checker. Determine whether two mathematical expressions are equivalent.
+
+Rules:
+- Accept symbolic transformations: rationalization, simplification, fraction-decimal conversion, exponent rules.
+- Reject numerical approximations of irrational values (e.g., 6.28318... is NOT equivalent to 2*pi).
+- If the expressions are clearly equivalent, respond with EXACTLY: Equivalent
+- If the expressions are NOT equivalent or you cannot determine equivalence, respond with EXACTLY: Not equivalent
+
+Ground truth answer: {ground_truth}
+Predicted answer: {prediction}
+
+Are these two expressions mathematically equivalent? Respond with only "Equivalent" or "Not equivalent"."""
+
+
+def _locate_answer_ineqmath(response: str) -> str:
+    """Extract the final answer portion from a model response, searching from the end."""
+    triggers = ["final answer is", "answer is", "final answer"]
+    text = response.strip()
+    lower = text.lower()
+    for trigger in triggers:
+        pos = lower.rfind(trigger)
+        if pos != -1:
+            return text[pos + len(trigger):].strip().rstrip(".")
+    # Fallback: last 3 lines
+    lines = text.strip().split("\n")
+    return "\n".join(lines[-3:]).strip()
+
+
+def _extract_relation_answer(answer_text: str, choices: list) -> str:
+    """Extract the choice letter from a relation-type answer."""
+    if not choices:
+        return answer_text
+    # Try to find (A)-(F) pattern
+    m = re.search(r'\(([A-F])\)', answer_text)
+    if m:
+        return f"({m.group(1)})"
+    # Try bare letter
+    for letter in "ABCDEF":
+        if letter in answer_text.upper():
+            return f"({letter})"
+    return answer_text.strip()
+
+
+def _clean_bound_expr(expr: str) -> str:
+    """Normalize a bound expression for comparison."""
+    expr = expr.replace("$", "").replace("\\boxed{", "").replace("}", "")
+    expr = expr.replace(" ", "").strip()
+    # Remove leading "C=" or "c=" if present
+    lower = expr.lower()
+    if lower.startswith("c="):
+        expr = expr[2:]
+    return expr.strip()
+
+
+def _verify_bound_with_llm(prediction: str, ground_truth: str) -> bool:
+    """Use an LLM to check mathematical equivalence of two bound expressions."""
+    from litellm import completion as litellm_completion
+
+    prompt = _BOUND_VERIFY_PROMPT.format(
+        ground_truth=ground_truth, prediction=prediction
+    )
+    try:
+        resp = litellm_completion(
+            model="openai/gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=32,
+        )
+        result = resp.choices[0].message.content.strip().lower()  # type: ignore[union-attr]
+        return "equivalent" in result and "not equivalent" not in result
+    except Exception:
+        return False
+
+
+def eval_for_ineqmath(
+    problem_type: str,
+    output: str,
+    target: str,
+    choices_json: str = "",
+) -> bool:
+    """
+    Evaluate an IneqMath answer.
+
+    For *relation* problems: compare the predicted choice letter against the target.
+    For *bound* problems: try exact match first, then fall back to LLM equivalence.
+
+    Args:
+        problem_type: "bound" or "relation"
+        output: The model's extracted final answer string.
+        target: The ground-truth answer string.
+        choices_json: JSON-encoded list of choice strings (only for relation problems).
+
+    Returns:
+        True if the answer is judged correct.
+    """
+    import json as _json
+
+    if not output or not target:
+        return False
+
+    if problem_type == "relation":
+        choices = _json.loads(choices_json) if choices_json else []
+        pred_letter = _extract_relation_answer(output, choices)
+        target_letter = _extract_relation_answer(target, choices)
+        return pred_letter == target_letter
+
+    # Bound estimation
+    pred_clean = _clean_bound_expr(output)
+    target_clean = _clean_bound_expr(target)
+
+    # Exact string match
+    if pred_clean == target_clean:
+        return True
+
+    # LLM equivalence check
+    return _verify_bound_with_llm(pred_clean, target_clean)
+
+
 def eval_for_pyton_programming_puzzles(input: str, output: str) -> bool:
     """
     Evaluate if the output is a valid Python programming puzzle solution.

@@ -106,6 +106,76 @@ class LanguageModel:
 
         return [memory_store[i] for i in top_indices]
 
+    @staticmethod
+    def _select_indices_from_scores(
+        scores: np.ndarray,
+        similarities: np.ndarray,
+        retrieve_top_k: int,
+        retrieve_prob: float = None,
+    ) -> np.ndarray:
+        """
+        Select indices by either:
+        - top-k calibrated scores with a similarity anchor
+        - softmax cumulative threshold over calibrated scores
+        """
+        if scores.size == 0:
+            return np.array([], dtype=int)
+
+        if retrieve_prob is not None and retrieve_prob > 0:
+            target_prob = float(np.clip(retrieve_prob, 0.01, 1.0))
+            temperature = 0.15
+            logits = scores / temperature
+            logits_shifted = logits - np.max(logits)
+            exp_logits = np.exp(logits_shifted)
+            probs = exp_logits / np.sum(exp_logits)
+
+            sorted_indices = np.argsort(probs)[::-1]
+            cumulative = 0.0
+            selected_indices = []
+            for si in sorted_indices:
+                selected_indices.append(int(si))
+                cumulative += float(probs[si])
+                if cumulative >= target_prob:
+                    break
+
+            # Keep at least one candidate selected purely by similarity.
+            best_similarity_idx = int(np.argmax(similarities))
+            if best_similarity_idx not in selected_indices:
+                selected_indices.append(best_similarity_idx)
+            return np.array(selected_indices, dtype=int)
+
+        top_k = max(1, int(retrieve_top_k))
+        by_score = np.argsort(scores)[::-1][:top_k].tolist()
+        by_similarity = np.argsort(similarities)[::-1][:max(1, top_k // 2)].tolist()
+        merged: List[int] = []
+        for idx in by_score + by_similarity:
+            idx_int = int(idx)
+            if idx_int not in merged:
+                merged.append(idx_int)
+            if len(merged) >= top_k:
+                break
+        return np.array(merged, dtype=int)
+
+    # Added By Jerry Gu
+    def _retrieve_by_prob(self, query_embedding: List[float], memory_store: List[dict], prob: float) -> List[dict]:
+        """
+        Return memory items selected by softmax-weighted cumulative probability threshold.
+        Delegates to _select_indices_from_scores for identical behaviour to the Downloads repo.
+        """
+        if not memory_store:
+            return []
+
+        embedding_matrix = np.array([item["embedding"] for item in memory_store])
+        similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
+
+        selected_indices = self._select_indices_from_scores(
+            scores=similarities,
+            similarities=similarities,
+            retrieve_top_k=0,
+            retrieve_prob=prob,
+        )
+        return [memory_store[i] for i in selected_indices]
+
     def generate(self,
         history: List[str],
         temperature: float = 0.1,
@@ -213,6 +283,7 @@ class LanguageModel:
         original_input_embeddings: np.ndarray = None,
         generator_outputs_so_far: List[str] = None,
         retrieve_top_k: int = 3,
+        retrieve_prob: float = None,
     ) -> Tuple[str, str, str, str]:
         """
         Generate a response from the language model.
@@ -483,9 +554,12 @@ class LanguageModel:
                 except Exception:
                     memory_store = []
 
-            # Step 1: Retrieve top-k relevant memory items via cosine similarity
+            # Step 1: Retrieve relevant memory items via cosine similarity
             query_embedding = self._embed_text(input_txt)
-            retrieved_items = self._retrieve_top_k_items(query_embedding, memory_store, retrieve_top_k)
+            if retrieve_prob is not None:
+                retrieved_items = self._retrieve_by_prob(query_embedding, memory_store, retrieve_prob)
+            else:
+                retrieved_items = self._retrieve_top_k_items(query_embedding, memory_store, retrieve_top_k)
 
             retrieved_cheatsheet = "\n\n".join(item["text"] for item in retrieved_items) if retrieved_items else "(empty)"
 

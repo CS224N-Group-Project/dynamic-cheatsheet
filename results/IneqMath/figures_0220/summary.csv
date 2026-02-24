@@ -1,0 +1,8 @@
+task,approach,model,n,correct,accuracy,relation_correct,relation_total,relation_acc,bound_correct,bound_total,bound_acc,file
+tmp,FullHistoryAppending,openai/gpt-4o,12,8,0.666667,4,7,0.571429,4,5,0.800000,gpt-4o_FullHistoryAppending_2026-02-20-16-52_.jsonl
+tmp,Dynamic_Retrieval,openai/gpt-4o,53,33,0.622642,14,29,0.482759,19,24,0.791667,gpt-4o_Dynamic_Retrieval_2026-02-20-16-12_.jsonl
+tmp,DynamicCheatsheet_SelfCorrection_Improved,openai/gpt-4o,19,11,0.578947,5,12,0.416667,6,7,0.857143,gpt-4o_DynamicCheatsheet_SelfCorrection_Improved_2026-02-20-19-30_.jsonl
+tmp,DynamicCheatsheet_SelfCorrection,openai/gpt-4o,100,57,0.570000,20,50,0.400000,37,50,0.740000,gpt-4o_DynamicCheatsheet_SelfCorrection_2026-02-20-16-54_.jsonl
+tmp,DynamicCheatsheet_Cumulative,openai/gpt-4o,100,55,0.550000,20,50,0.400000,35,50,0.700000,gpt-4o_DynamicCheatsheet_Cumulative_2026-02-20-15-41_.jsonl
+tmp,DynamicCheatsheet_RetrievalSynthesis,openai/gpt-4o,100,52,0.520000,16,50,0.320000,36,50,0.720000,gpt-4o_DynamicCheatsheet_RetrievalSynthesis_2026-02-20-16-18_.jsonl
+tmp,default,openai/gpt-4o,100,51,0.510000,19,50,0.380000,32,50,0.640000,gpt-4o_default_2026-02-20-15-26_.jsonl

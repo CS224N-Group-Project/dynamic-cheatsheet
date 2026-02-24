@@ -38,12 +38,6 @@ Unlike fine-tuning or static retrieval methods, DC adapts LMs' problem-solving s
 
 Getting started with Dynamic Cheatsheet is straightforward. The framework allows you to enhance language models with persistent memory capabilities across inference sessions.
 
-Install dependencies first:
-
-```bash
-pip install -r requirements.txt
-```
-
 ### Basic Usage
 
 ```python
@@ -105,7 +99,7 @@ For a comprehensive demonstration of Dynamic Cheatsheet capabilities, please tak
 The following command demonstrates how to benchmark Dynamic Cheatsheet with Retrieval and Synthesis on the Game of 24 puzzle:
 
 ```bash
-python run_benchmark.py --task "GameOf24" --approach_name "DynamicCheatsheet_RetrievalSynthesis" \
+python run_benchmark.py --task "GameOf24" --approach "DynamicCheatsheet_RetrievalSynthesis" \
     --model_name "openai/gpt-4o-2024-11-20" \
     --additional_flag_for_save_path "DynamicCheatsheet_RetrievalSynthesis" \
     --save_directory "TEST_RESULTS" \
@@ -117,7 +111,7 @@ python run_benchmark.py --task "GameOf24" --approach_name "DynamicCheatsheet_Ret
 #### Key Parameters:
 
 - `--task`: Specifies the benchmark task (options include: `GameOf24`, `AIME_2025`, `GPQA_Diamond`, `MathEquationBalancer`, *inter alia*).
-- `--approach_name`: Selects which DC variant or generation baseline to use (options include: `DynamicCheatsheet_RetrievalSynthesis`, `DynamicCheatsheet_RetrievalSynthesis`, `Dynamic_Retrieval`, `FullHistoryAppending`, `default`).
+- `--approach`: Selects which DC variant or generation baseline to use (options include: `DynamicCheatsheet_RetrievalSynthesis`, `DynamicCheatsheet_RetrievalSynthesis`, `Dynamic_Retrieval`, `FullHistoryAppending`, `default`).
 - `--model_name`: Defines which LLM to use (supports many provider formats); we recommend using smaller and cheaper models (e.g., `openai/gpt-4o-mini`) for initial testing.
 - `--max_n_samples`: Limits the number of examples to process (useful for testing).
 - `--save_directory`: Where to store benchmark results and generated cheatsheets.

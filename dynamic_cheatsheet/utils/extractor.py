@@ -5,6 +5,7 @@ The functions are:
 * extract_answer(response: str) -> str: Extracts the final answer from the model response.
 * extract_cheatsheet(response: str, old_cheatsheet: str) -> str: Extracts the cheatsheet from the model response.
 * extract_solution(response: str, header: str = "SOLUTION EVALUATION:", error_message : str = "No solution evaluation found") -> str: Extracts the solution evaluation from the model response.
+* extract_all_memory_items(text: str) -> List[str]: Extracts all <memory_item>...</memory_item> blocks from a cheatsheet string. (Added by Jerry)
 
 Additional functions can be added as needed.
 """
@@ -84,6 +85,26 @@ def extract_cheatsheet(
             return old_cheatsheet
     else:
         return old_cheatsheet
+
+
+# Added by Jerry Gu
+def extract_all_memory_items(text: str) -> list:
+    """
+    Extracts all <memory_item>...</memory_item> blocks from a cheatsheet string.
+
+    Arguments:
+        text : str : The cheatsheet text (typically the content inside <cheatsheet> tags).
+
+    Returns:
+        list : A list of memory item strings, each including its outer <memory_item> tags.
+               Returns an empty list if no items are found.
+    """
+    items = []
+    for part in text.split("<memory_item>")[1:]:
+        if "</memory_item>" in part:
+            inner = part.split("</memory_item>")[0].strip()
+            items.append(f"<memory_item>\n{inner}\n</memory_item>")
+    return items
 
 
 def extract_solution(

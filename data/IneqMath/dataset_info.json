@@ -1,0 +1,32 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "input": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "data_id": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "type": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "choices": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "solution": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

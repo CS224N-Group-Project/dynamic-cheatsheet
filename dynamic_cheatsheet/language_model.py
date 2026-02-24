@@ -1,10 +1,11 @@
+import json
 import numpy as np
 import tiktoken
-from typing import Any, Dict, List
+from typing import List, Tuple
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
-from .utils.extractor import extract_answer, extract_cheatsheet
-from litellm import completion
+from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items
+from litellm import completion, embedding as litellm_embedding
 from functools import partial
 
 class LanguageModel:
@@ -33,7 +34,8 @@ class LanguageModel:
             "meta-llama/Llama-3.3-70B-Instruct-Turbo",
             "openai/o3-mini", "openai/o3-mini-2025-01-31",
             "openai/o1", "openai/o1-2024-12-17",
-            "anthropic/claude-3-5-sonnet-latest", "anthropic/claude-3-5-sonnet-20241022",
+            "anthropic/claude-3-5-sonnet-latest", "anth"
+            "ropic/claude-3-5-sonnet-20241022",
             "anthropic/claude-3-5-haiku-latest", "anthropic/claude-3-5-haiku-20241022",
             "anthropic/claude-3-7-sonnet-latest", "anthropic/claude-3-7-sonnet-20250219",
             "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
@@ -62,6 +64,117 @@ class LanguageModel:
         """
         tokens = self.gpt4Tokenizer.encode(text)
         return len(tokens)
+
+    # Added By Jerry Gu
+    def _embed_text(self, text: str) -> List[float]:
+        """
+        Embed a single text string using OpenAI's text-embedding-3-small model.
+
+        Arguments:
+            text : str : The text to embed.
+
+        Returns:
+            List[float] : The 1536-dimensional embedding vector.
+        """
+        response = litellm_embedding(
+            model="openai/text-embedding-3-small",
+            input=[text],
+        )
+        return response.data[0]["embedding"]
+
+    # Added By Jerry Gu
+    def _retrieve_top_k_items(self, query_embedding: List[float], memory_store: List[dict], k: int) -> List[dict]:
+        """
+        Return the top-k memory items most similar to the query embedding.
+
+        Arguments:
+            query_embedding : List[float] : The embedding vector of the current query.
+            memory_store : List[dict] : A list of memory item dicts, each with a "text" and "embedding" key.
+            k : int : The number of top items to retrieve.
+
+        Returns:
+            List[dict] : The top-k memory items sorted by descending cosine similarity.
+        """
+        if not memory_store:
+            return []
+
+        embedding_matrix = np.array([item["embedding"] for item in memory_store])
+        similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
+
+        top_k = min(k, len(memory_store))
+        top_indices = np.argsort(similarities)[::-1][:top_k]
+
+        return [memory_store[i] for i in top_indices]
+
+    @staticmethod
+    def _select_indices_from_scores(
+        scores: np.ndarray,
+        similarities: np.ndarray,
+        retrieve_top_k: int,
+        retrieve_prob: float = None,
+    ) -> np.ndarray:
+        """
+        Select indices by either:
+        - top-k calibrated scores with a similarity anchor
+        - softmax cumulative threshold over calibrated scores
+        """
+        if scores.size == 0:
+            return np.array([], dtype=int)
+
+        if retrieve_prob is not None and retrieve_prob > 0:
+            target_prob = float(np.clip(retrieve_prob, 0.01, 1.0))
+            temperature = 0.15
+            logits = scores / temperature
+            logits_shifted = logits - np.max(logits)
+            exp_logits = np.exp(logits_shifted)
+            probs = exp_logits / np.sum(exp_logits)
+
+            sorted_indices = np.argsort(probs)[::-1]
+            cumulative = 0.0
+            selected_indices = []
+            for si in sorted_indices:
+                selected_indices.append(int(si))
+                cumulative += float(probs[si])
+                if cumulative >= target_prob:
+                    break
+
+            # Keep at least one candidate selected purely by similarity.
+            best_similarity_idx = int(np.argmax(similarities))
+            if best_similarity_idx not in selected_indices:
+                selected_indices.append(best_similarity_idx)
+            return np.array(selected_indices, dtype=int)
+
+        top_k = max(1, int(retrieve_top_k))
+        by_score = np.argsort(scores)[::-1][:top_k].tolist()
+        by_similarity = np.argsort(similarities)[::-1][:max(1, top_k // 2)].tolist()
+        merged: List[int] = []
+        for idx in by_score + by_similarity:
+            idx_int = int(idx)
+            if idx_int not in merged:
+                merged.append(idx_int)
+            if len(merged) >= top_k:
+                break
+        return np.array(merged, dtype=int)
+
+    # Added By Jerry Gu
+    def _retrieve_by_prob(self, query_embedding: List[float], memory_store: List[dict], prob: float) -> List[dict]:
+        """
+        Return memory items selected by softmax-weighted cumulative probability threshold.
+        Delegates to _select_indices_from_scores for identical behaviour to the Downloads repo.
+        """
+        if not memory_store:
+            return []
+
+        embedding_matrix = np.array([item["embedding"] for item in memory_store])
+        similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
+
+        selected_indices = self._select_indices_from_scores(
+            scores=similarities,
+            similarities=similarities,
+            retrieve_top_k=0,
+            retrieve_prob=prob,
+        )
+        return [memory_store[i] for i in selected_indices]
 
     def generate(self,
         history: List[str],
@@ -102,7 +215,7 @@ class LanguageModel:
             model=self.model_name,
             temperature=temperature,
             max_completion_tokens=max_tokens,
-        ).choices[0].message["content"] # type: ignore
+        ).choices[0].message["content"]
 
         # If Python code execution is allowed, execute the code
         pre_code_execution_flag = output.split(code_execution_flag)[0].strip()
@@ -128,7 +241,7 @@ class LanguageModel:
                     {"role": "assistant", "content": current_output},
                     {"role": "user", "content": f"Proceed with any additional steps required and provide the completed solution. If everything is already complete, type FINAL ANSWER and submit it in the expected format. If you are stucked, please try alternative methods to solve the problem and provide the final solution.{warning_txt}"}
                 ]
-                history += new_messages # type: ignore
+                history += new_messages
                 return self.generate(
                     history=history,
                     temperature=temperature,
@@ -148,24 +261,30 @@ class LanguageModel:
             final_output = f"{final_output}\n\n{output}".strip()
             return final_output
 
-    def advanced_generate(  # type: ignore[assignment]
-        self,
+    # TODO: Need to add a retrieval mechamism for specific memory's in the cheatsheet
+    # Part 1: retrieve top k strategies from cheatsheet during generation and pass to generator (we only need new embedding)
+    # Part 2: decide whether a new strategy is needed or if an existing strategy needs to be fixed, or if nothing is needed. Then,
+    #         have a curator create a new <memory> item for each chage needed in a separate call (limit to k calls)
+    #         and then repeat
+    # 
+    def advanced_generate(self,
         approach_name: str,
         input_txt: str,
-        cheatsheet: str = None,  # type: ignore[assignment]
-        generator_template: str = None,  # type: ignore[assignment]
-        cheatsheet_template: str = None,  # type: ignore[assignment]
+        cheatsheet: str = None,
+        generator_template: str = None,
+        cheatsheet_template: str = None,
         temperature: float = 0.0,
-        max_tokens: int = 2048,
+        max_tokens: int = 4096, # was 2048,
         max_num_rounds: int = 1,
         allow_code_execution: bool = True,
         code_execution_flag: str = "EXECUTE CODE!",
         add_previous_answers_to_cheatsheet: bool = True,
-        original_input_corpus: List[str] = None,  # type: ignore[assignment]
-        original_input_embeddings: np.ndarray = None,  # type: ignore[assignment]
-        generator_outputs_so_far: List[str] = None,  # type: ignore[assignment]
+        original_input_corpus: List[str] = None,
+        original_input_embeddings: np.ndarray = None,
+        generator_outputs_so_far: List[str] = None,
         retrieve_top_k: int = 3,
-    ) -> Dict[str, Any]:
+        retrieve_prob: float = None,
+    ) -> Tuple[str, str, str, str]:
         """
         Generate a response from the language model.
 
@@ -200,7 +319,7 @@ class LanguageModel:
                 {"role": "user", "content": generator_prompt},
             ]
             generator_output = self.generate(
-                history=generator_history, # type: ignore
+                history=generator_history,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 allow_code_execution=allow_code_execution,
@@ -257,7 +376,7 @@ class LanguageModel:
                 generator_history = [{"role": "user", "content": generator_prompt}]
                 # Run the generator model
                 generator_output = self.generate(
-                    history=generator_history, # type: ignore
+                    history=generator_history,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     allow_code_execution=allow_code_execution,
@@ -271,7 +390,7 @@ class LanguageModel:
 
                 cheatsheet_history = [{"role": "user", "content": cheatsheet_prompt}]
                 cheatsheet_output = self.generate(
-                    history=cheatsheet_history, # type: ignore
+                    history=cheatsheet_history,
                     temperature=temperature,
                     max_tokens=2*max_tokens,
                     allow_code_execution=False,
@@ -296,8 +415,8 @@ class LanguageModel:
                 "input_txt": input_txt,
                 "steps": steps,
                 "previous_answers": previous_answers,
-                "final_answer": generator_answer, # type: ignore
-                "final_cheatsheet": new_cheatsheet, # type: ignore
+                "final_answer": generator_answer,
+                "final_cheatsheet": new_cheatsheet,
                 "final_output": generator_output,
             }
         elif approach_name == "FullHistoryAppending":
@@ -319,7 +438,7 @@ class LanguageModel:
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", curated_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
-                    history=generator_history, # type: ignore
+                    history=generator_history,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     allow_code_execution=allow_code_execution,
@@ -353,7 +472,7 @@ class LanguageModel:
             
             # Retrieve the most similar k input-output pairs from the previous inputs and outputs
             if len(prev_original_input_embeddings) > 0:
-                similarities = cosine_similarity(np.array([current_original_input_embedding]), prev_original_input_embeddings)
+                similarities = cosine_similarity([current_original_input_embedding], prev_original_input_embeddings)
                 top_k_indices = np.argsort(similarities[0])[::-1][:retrieve_top_k]
                 top_k_original_inputs = [original_input_corpus[i] for i in top_k_indices]
                 top_k_original_outputs = [generator_outputs_so_far[i] for i in top_k_indices]
@@ -385,7 +504,7 @@ class LanguageModel:
                 # Now, we are ready to run the cheatsheet curator model
                 cheatsheet_history = [{"role": "user", "content": cheatsheet_prompt}]
                 cheatsheet_output = self.generate(
-                    history=cheatsheet_history, # type: ignore
+                    history=cheatsheet_history,
                     temperature=temperature,
                     max_tokens=2*max_tokens,
                     allow_code_execution=False,
@@ -398,7 +517,7 @@ class LanguageModel:
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", curated_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
-                    history=generator_history, # type: ignore
+                    history=generator_history,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     allow_code_execution=allow_code_execution,
@@ -424,6 +543,93 @@ class LanguageModel:
                 "final_answer": generator_answer,
                 "final_output": generator_output,
                 "final_cheatsheet": curated_cheatsheet,
+            }
+        elif approach_name == "DynamicCheatsheet_StrategicChunkRetrieval":       # Added By Jerry Gu
+            # Deserialize memory store from cheatsheet param
+            if cheatsheet is None or cheatsheet == "(empty)":
+                memory_store = []
+            else:
+                try:
+                    memory_store = json.loads(cheatsheet)
+                except Exception:
+                    memory_store = []
+
+            # Step 1: Retrieve relevant memory items via cosine similarity
+            query_embedding = self._embed_text(input_txt)
+            if retrieve_prob is not None:
+                retrieved_items = self._retrieve_by_prob(query_embedding, memory_store, retrieve_prob)
+            else:
+                retrieved_items = self._retrieve_top_k_items(query_embedding, memory_store, retrieve_top_k)
+
+            retrieved_cheatsheet = "\n\n".join(item["text"] for item in retrieved_items) if retrieved_items else "(empty)"
+
+            # Step 2: Generate — exactly like DC-Cumulative, retrieved items serve as the cheatsheet
+            generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", retrieved_cheatsheet)
+            generator_history = [{"role": "user", "content": generator_prompt}]
+            generator_output = self.generate(
+                history=generator_history,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                allow_code_execution=allow_code_execution,
+                code_execution_flag=code_execution_flag,
+            )
+            generator_answer = extract_answer(generator_output)
+
+            # Step 3: Curator — exactly like DC-Cumulative, but on the K retrieved items only
+            # [[PREVIOUS_CHEATSHEET]] = the K retrieved items, [[QUESTION]] and [[MODEL_ANSWER]] same as DC-Cumulative
+            curator_prompt = cheatsheet_template.replace("[[PREVIOUS_CHEATSHEET]]", retrieved_cheatsheet).replace("[[QUESTION]]", input_txt).replace("[[MODEL_ANSWER]]", generator_output)
+            curator_history = [{"role": "user", "content": curator_prompt}]
+            curator_output = self.generate(
+                history=curator_history,
+                temperature=temperature,
+                max_tokens=2*max_tokens,
+                allow_code_execution=False,
+            )
+
+            # Extract improved cheatsheet and parse individual memory items from it
+            new_curator_cheatsheet = extract_cheatsheet(response=curator_output, old_cheatsheet=retrieved_cheatsheet)
+            new_items_text = extract_all_memory_items(new_curator_cheatsheet)
+
+            # Remove the K retrieved items from the memory store, add the curator-improved items
+            retrieved_ids = {item["id"] for item in retrieved_items}
+            memory_store = [item for item in memory_store if item["id"] not in retrieved_ids]
+            next_id = max((item["id"] for item in memory_store), default=-1) + 1
+            for item_text in new_items_text:
+                memory_store.append({
+                    "id": next_id,
+                    "text": item_text,
+                    "source_input": input_txt,
+                    "embedding": self._embed_text(item_text),
+                    "count": 1,
+                })
+                next_id += 1
+
+            # Serialize two versions of the memory store:
+            # - final_cheatsheet: text-only JSON (no embeddings) — saved to JSONL
+            # - final_cheatsheet_with_embeddings: full JSON with embeddings — in-memory carry-forward only
+            memory_store_clean = [{"id": item["id"], "text": item["text"], "source_input": item["source_input"], "count": item["count"]} for item in memory_store]
+            new_cheatsheet = json.dumps(memory_store_clean)
+            new_cheatsheet_with_embeddings = json.dumps(memory_store)
+            memory_store_text = "\n\n".join(item["text"] for item in memory_store) if memory_store else "(empty)"
+            return {
+                "input_txt": input_txt,
+                "steps": [
+                    {
+                        "round": 0,
+                        "generator_prompt": generator_prompt,
+                        "generator_output": generator_output,
+                        "generator_answer": generator_answer,
+                        "retrieved_items": [{k: v for k, v in item.items() if k != "embedding"} for item in retrieved_items],
+                        "current_cheatsheet": retrieved_cheatsheet,
+                        "new_cheatsheet": memory_store_text,
+                    }
+                ],
+                "final_answer": generator_answer,
+                "final_output": generator_output,
+                "final_cheatsheet": new_cheatsheet,                               # text-only — saved to JSONL
+                "final_cheatsheet_with_embeddings": new_cheatsheet_with_embeddings,  # popped by run_benchmark, never saved
+                "memory_store_text": memory_store_text,
+                "memory_store_size": len(memory_store),
             }
         else:
             raise ValueError(f"Approach '{approach_name}' not found.")

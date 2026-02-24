@@ -1,0 +1,19 @@
+{
+    "task": "IneqMath",
+    "approach_name": "DynamicCheatsheet_SelfCorrection",
+    "model_name": "gemini/gemini-2.5-pro",
+    "generator_prompt_path": "prompts/generator_prompt.txt",
+    "cheatsheet_prompt_path": "prompts/curator_prompt_for_dc_self_correction.txt",
+    "max_tokens": 2048,
+    "temperature": 0.0,
+    "max_num_rounds": 1,
+    "execute_python_code": true,
+    "initialize_cheatsheet_path": null,
+    "retrieve_top_k": 3,
+    "continue_from_last_run_path": null,
+    "save_directory": "results",
+    "additional_flag_for_save_path": "",
+    "max_n_samples": -1,
+    "no_shuffle": false,
+    "prob": null
+}

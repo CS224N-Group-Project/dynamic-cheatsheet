@@ -101,8 +101,16 @@ class LanguageModel:
         embedding_matrix = np.array([item["embedding"] for item in memory_store])
         similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
 
+        # Blend cosine similarity with a log-count bonus so frequently-used items
+        # surface over untested ones with similar similarity scores.
+        count_array = np.array([item.get("count", 1) for item in memory_store], dtype=float)
+        max_count = max(float(count_array.max()), 1.0)
+        count_bonus = np.log1p(count_array) / np.log1p(max_count)
+        alpha = 0.85
+        scores = alpha * similarities + (1 - alpha) * count_bonus
+
         top_k = min(k, len(memory_store))
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        top_indices = np.argsort(scores)[::-1][:top_k]
 
         return [memory_store[i] for i in top_indices]
 
@@ -168,8 +176,15 @@ class LanguageModel:
         embedding_matrix = np.array([item["embedding"] for item in memory_store])
         similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
 
+        # Blend cosine similarity with a log-count bonus (same as _retrieve_top_k_items)
+        count_array = np.array([item.get("count", 1) for item in memory_store], dtype=float)
+        max_count = max(float(count_array.max()), 1.0)
+        count_bonus = np.log1p(count_array) / np.log1p(max_count)
+        alpha = 0.85
+        scores = alpha * similarities + (1 - alpha) * count_bonus
+
         selected_indices = self._select_indices_from_scores(
-            scores=similarities,
+            scores=scores,
             similarities=similarities,
             retrieve_top_k=0,
             retrieve_prob=prob,
@@ -561,6 +576,12 @@ class LanguageModel:
             else:
                 retrieved_items = self._retrieve_top_k_items(query_embedding, memory_store, retrieve_top_k)
 
+            # Increment count for each retrieved item so usage frequency is tracked
+            retrieved_ids_set = {item["id"] for item in retrieved_items}
+            for ms_item in memory_store:
+                if ms_item["id"] in retrieved_ids_set:
+                    ms_item["count"] = ms_item.get("count", 0) + 1
+
             retrieved_cheatsheet = "\n\n".join(item["text"] for item in retrieved_items) if retrieved_items else "(empty)"
 
             # Step 2: Generate — exactly like DC-Cumulative, retrieved items serve as the cheatsheet
@@ -599,7 +620,7 @@ class LanguageModel:
                     "id": next_id,
                     "text": item_text,
                     "source_input": input_txt,
-                    "embedding": self._embed_text(input_txt),  # embed source question, not hint text
+                    "embedding": self._embed_text(item_text),  # embed strategy text for content-based retrieval
                     "count": 1,
                 })
                 next_id += 1

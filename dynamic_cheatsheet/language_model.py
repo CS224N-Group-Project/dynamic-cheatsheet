@@ -599,7 +599,7 @@ class LanguageModel:
                     "id": next_id,
                     "text": item_text,
                     "source_input": input_txt,
-                    "embedding": self._embed_text(item_text),
+                    "embedding": self._embed_text(input_txt),  # embed source question, not hint text
                     "count": 1,
                 })
                 next_id += 1

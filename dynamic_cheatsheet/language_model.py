@@ -1,4 +1,5 @@
 import json
+import time
 import numpy as np
 import tiktoken
 from typing import List, Tuple
@@ -6,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
 from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items
 from litellm import completion, embedding as litellm_embedding
+from litellm.exceptions import RateLimitError
 from functools import partial
 
 class LanguageModel:
@@ -224,13 +226,22 @@ class LanguageModel:
             raise ValueError("History must contain at least one message.")
         
 
-        # Generate the response from the language model
-        output = self.client(
-            messages=history,
-            model=self.model_name,
-            temperature=temperature,
-            max_completion_tokens=max_tokens,
-        ).choices[0].message["content"]
+        # Generate the response from the language model (with rate-limit retry)
+        for _attempt in range(8):
+            try:
+                output = self.client(
+                    messages=history,
+                    model=self.model_name,
+                    temperature=temperature,
+                    max_completion_tokens=max_tokens,
+                ).choices[0].message["content"]
+                break
+            except RateLimitError as e:
+                wait = min(2 ** _attempt * 5, 120)
+                print(f"Rate limit hit, retrying in {wait}s... ({e})")
+                time.sleep(wait)
+        else:
+            raise RateLimitError("Max retries exceeded due to rate limiting.")
 
         # If Python code execution is allowed, execute the code
         pre_code_execution_flag = output.split(code_execution_flag)[0].strip()

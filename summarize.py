@@ -9,6 +9,10 @@ import json
 import re
 from pathlib import Path
 
+import os
+os.environ.pop('MPLBACKEND', None)
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -116,12 +120,35 @@ def load_results(results_dir: Path) -> dict[str, dict[str, float]]:
 # Plotting
 # ---------------------------------------------------------------------------
 
+def _method_sort_key(method: str) -> int:
+    """Return sort position based on desired method order.
+
+    Order: Baseline < EmptyCheatsheet < Cumulative < Retrieval < RetrievalSynthesis < StrategicChunk
+    More specific keywords are checked first to avoid false matches.
+    """
+    lower = method.lower()
+    if "strategic" in lower:
+        return 5
+    if "synthesis" in lower:
+        return 4
+    if "retrieval" in lower or "retrieve" in lower:
+        return 3
+    if "cumulative" in lower:
+        return 2
+    if "empty" in lower:
+        return 1
+    if "baseline" in lower or "default" in lower:
+        return 0
+    return 6  # unknown methods go last
+
+
 def plot(dataset_name: str, data: dict[str, dict[str, float]]) -> None:
     all_methods: list[str] = []
     for methods in data.values():
         for m in methods:
             if m not in all_methods:
                 all_methods.append(m)
+    all_methods.sort(key=_method_sort_key)
 
     models = list(data.keys())
     n_models = len(models)
@@ -189,6 +216,7 @@ def main() -> None:
         for m in methods:
             if m not in all_methods:
                 all_methods.append(m)
+    all_methods.sort(key=_method_sort_key)
 
     col_w = max(len(m) for m in all_methods) + 2
     header = f"{'Model':<25}" + "".join(f"{m:>{col_w}}" for m in all_methods)

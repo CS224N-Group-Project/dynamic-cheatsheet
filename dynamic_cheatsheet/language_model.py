@@ -4,25 +4,31 @@ from typing import List, Tuple
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
 from .utils.extractor import extract_answer, extract_cheatsheet
+from .utils.confidence import ConfidenceScorer, compute_rerank_score
 from litellm import completion
 from functools import partial
 
 class LanguageModel:
     def __init__(self,
         model_name: str,
+        enable_confidence: bool = True,
+        confidence_n_samples: int = 3,
     ) -> None:
         """
         LanguageModel class to interact with different language models.
 
         Arguments:
             model_name : str : The name of the language model to use.
-            api_key : str : The API key for the model.
+            enable_confidence : bool : Whether to enable confidence scoring (default: True).
+            confidence_n_samples : int : Number of ensemble samples for confidence (default: 3).
 
         Raises:
             ValueError : If the model name is not found.
         """
 
         self.model_name = model_name
+        self.enable_confidence = enable_confidence
+        self.confidence_n_samples = confidence_n_samples
 
         # Load the client for the model based on the model name
         if self.model_name in [
@@ -52,8 +58,16 @@ class LanguageModel:
             self.client = partial(completion, model=self.model_name)
         else:
             raise ValueError(f"Model '{model_name}' not found.")
-        
+
         self.gpt4Tokenizer = tiktoken.encoding_for_model('gpt-4o')
+
+        # Initialize confidence scorer if enabled
+        if self.enable_confidence:
+            self.confidence_scorer = ConfidenceScorer(
+                model_client=self.client,
+                n_samples=self.confidence_n_samples
+            )
+            self.confidence_metadata = {}  # Cache for retrieval, indexed by example number
         
 
     def count_tokens(self, text: str) -> int:
@@ -62,6 +76,40 @@ class LanguageModel:
         """
         tokens = self.gpt4Tokenizer.encode(text)
         return len(tokens)
+
+    def _compute_and_store_confidence(self,
+                                      history: List[dict],
+                                      generator_answer: str,
+                                      max_tokens: int = 2048) -> dict:
+        """
+        Compute confidence score for a generation and store in metadata cache.
+
+        Arguments:
+            history : List[dict] : The conversation history used for generation.
+            generator_answer : str : The extracted answer from the generation.
+            max_tokens : int : Maximum tokens for ensemble generation.
+
+        Returns:
+            dict : Confidence result containing trust_score, ensemble_answers, etc.
+        """
+        if not self.enable_confidence:
+            return None
+
+        try:
+            confidence_result = self.confidence_scorer.compute_trust_score(
+                prompt=history,
+                original_answer=generator_answer,
+                max_tokens=max_tokens
+            )
+
+            # Cache trust score for future retrieval (indexed by example number)
+            example_idx = len(self.confidence_metadata)
+            self.confidence_metadata[example_idx] = confidence_result
+
+            return confidence_result
+        except Exception as e:
+            print(f"Warning: Failed to compute confidence score: {e}")
+            return None
 
     def generate(self,
         history: List[str],
@@ -210,7 +258,9 @@ class LanguageModel:
                 generator_output,
             )
 
-            return {
+            
+
+            output_dict = {
                 "input_txt": input_txt,
                 "steps": [
                     {
@@ -228,6 +278,18 @@ class LanguageModel:
                 "final_cheatsheet": None,
                 "generator_output": generator_output,
             }
+
+            if self.enable_confidence:
+                # Compute confidence for this generation
+                confidence_result = self._compute_and_store_confidence(
+                    history=generator_history,
+                    generator_answer=generator_answer,
+                    max_tokens=max_tokens
+                )
+                if confidence_result is not None:
+                    output_dict["confidence"] = confidence_result
+
+            return output_dict
         
         elif approach_name == "DynamicCheatsheet_Cumulative":
             if cheatsheet is None:
@@ -291,7 +353,7 @@ class LanguageModel:
                     "new_cheatsheet": new_cheatsheet,
                 })
 
-            return {
+            output_dict = {
                 "input_txt": input_txt,
                 "steps": steps,
                 "previous_answers": previous_answers,
@@ -299,6 +361,19 @@ class LanguageModel:
                 "final_cheatsheet": new_cheatsheet,
                 "final_output": generator_output,
             }
+
+            if self.enable_confidence:
+                # Compute confidence for this generation
+                confidence_result = self._compute_and_store_confidence(
+                    history=generator_history,
+                    generator_answer=generator_answer,
+                    max_tokens=max_tokens
+                )
+                if confidence_result is not None:
+                    output_dict["confidence"] = confidence_result
+
+            return output_dict
+
         elif approach_name == "FullHistoryAppending":
             length_of_history = len(generator_outputs_so_far)
             if length_of_history > 0:
@@ -352,8 +427,38 @@ class LanguageModel:
             
             # Retrieve the most similar k input-output pairs from the previous inputs and outputs
             if len(prev_original_input_embeddings) > 0:
+                # Compute cosine similarities
                 similarities = cosine_similarity([current_original_input_embedding], prev_original_input_embeddings)
                 top_k_indices = np.argsort(similarities[0])[::-1][:retrieve_top_k]
+
+                if self.enable_confidence:
+                    # Get trust scores from confidence metadata cache
+                    trust_scores = []
+                    for i in range(len(prev_original_input_embeddings)):
+                        confidence_data = self.confidence_metadata.get(i, {})
+                        trust_scores.append(confidence_data.get('trust_score', 0.5))  # Default 0.5 if not available
+
+                    # Compute recency scores: exp(-0.1 * (N - i))
+                    N = len(prev_original_input_embeddings)
+                    recency_scores = [np.exp(-0.1 * (N - i)) for i in range(N)]
+
+                    # Compute diversity scores (simple uniform version for now)
+                    diversity_scores = [1.0] * N
+
+                    # Compute rerank scores combining all factors
+                    rerank_scores = []
+                    for i in range(N):
+                        rerank_score = compute_rerank_score(
+                            similarity=similarities[0][i],
+                            trust_score=trust_scores[i],
+                            recency=recency_scores[i],
+                            diversity=diversity_scores[i]
+                        )
+                        rerank_scores.append(rerank_score)
+
+                    # Use rerank_scores instead of similarities for top-k selection
+                    top_k_indices = np.argsort(rerank_scores)[::-1][:retrieve_top_k]
+                
                 top_k_original_inputs = [original_input_corpus[i] for i in top_k_indices]
                 top_k_original_outputs = [generator_outputs_so_far[i] for i in top_k_indices]
                 top_k_similar_values = similarities[0][top_k_indices]
@@ -406,7 +511,7 @@ class LanguageModel:
             # Extract the answer from the generator model
             generator_answer = extract_answer(generator_output)
 
-            return {
+            output_dict = {
                 "input_txt": input_txt,
                 "steps": [
                     {
@@ -424,5 +529,17 @@ class LanguageModel:
                 "final_output": generator_output,
                 "final_cheatsheet": curated_cheatsheet,
             }
+
+            if self.enable_confidence:
+                # Compute confidence for this generation
+                confidence_result = self._compute_and_store_confidence(
+                    history=generator_history,
+                    generator_answer=generator_answer,
+                    max_tokens=max_tokens
+                )
+                if confidence_result is not None:
+                    output_dict["confidence"] = confidence_result
+
+            return output_dict
         else:
             raise ValueError(f"Approach '{approach_name}' not found.")

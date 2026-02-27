@@ -30,6 +30,8 @@ ARGUMENT_FIELDS = [
     "additional_flag_for_save_path",
     "max_n_samples",
     "no_shuffle",
+    "enable_confidence",
+    "confidence_n_samples",
 ]
 
 
@@ -68,6 +70,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--additional_flag_for_save_path", default="")
     parser.add_argument("--max_n_samples", type=int, default=-1)
     parser.add_argument("--no_shuffle", type=str_to_bool, nargs="?", const=True, default=False)
+    parser.add_argument("--enable_confidence", type=str_to_bool, nargs="?", const=True, default=True,
+                       help="Enable ensemble-based confidence scoring (default: True)")
+    parser.add_argument("--confidence_n_samples", type=int, default=3,
+                       help="Number of ensemble samples for confidence scoring (default: 3)")
     return parser
 
 
@@ -148,6 +154,8 @@ def main(args: argparse.Namespace):
     # Initialize the language model
     model = LanguageModel(
         model_name=args.model_name,
+        enable_confidence=args.enable_confidence,
+        confidence_n_samples=args.confidence_n_samples,
     )
 
     # Add a flag to the save path if the code execution is not allowed

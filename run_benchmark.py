@@ -165,7 +165,7 @@ def main(args: argparse.Namespace):
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
-    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev"]:
+    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "AMC12_2021_2023"]:
         dataset = load_from_disk(f"data/{args.task}")
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
@@ -302,6 +302,8 @@ def main(args: argparse.Namespace):
         elif args.task == "MathEquationBalancer":
             # Add a specific format to the input for the MathEquationBalancer task
             input = f"Below is an equation with missing operators. Your task is to fill in the blanks with the correct mathematical operators: +, -, *, or /. Ensure that the equation is correct once the operators are added. The operators should be placed in the sequence they appear from left to right. Include the full equation with the operators filled in. For instance, for the equation 1 ? 2 ? 3 = 6, the correct answer is 1 + 2 + 3 = 6.\n\nEquation: {input}"
+        elif args.task == "AMC12_2021_2023":
+            input = f"{input}\n\n(This is a multiple-choice question. Select the correct option and state your final answer as the letter choice, e.g. (A).)"
         elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
             problem_type = dataset[idx]["type"]
             if problem_type == "relation":
@@ -377,7 +379,7 @@ def main(args: argparse.Namespace):
             result = eval_for_GameOf24(original_input, final_answer)
         elif args.task in ["AIME_2025", "AIME_2024", "AIME_2020_2024"]:
             result = eval_for_exact_matching_with_no_punctuation(final_answer.lower(), original_target.lower())
-        elif args.task in ["GPQA_Diamond", "MMLU_Pro_Engineering", "MMLU_Pro_Physics"]:
+        elif args.task in ["GPQA_Diamond", "MMLU_Pro_Engineering", "MMLU_Pro_Physics", "AMC12_2021_2023"]:
             result = eval_for_multiple_choice(input, final_answer, original_target)
         elif args.task == "MathEquationBalancer":
             result = eval_equation_balancer(original_input, final_answer, original_target)

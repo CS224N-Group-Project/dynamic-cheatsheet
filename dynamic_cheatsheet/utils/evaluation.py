@@ -262,7 +262,7 @@ def eval_for_multiple_choice(input_text: str, final_answer: str, target: str) ->
     # Handle numerical answers (if target is a number and answer contains that number)
     if target_letter.isdigit() and target_letter in clean_answer:
         return True
-        
+
     return False
 
 

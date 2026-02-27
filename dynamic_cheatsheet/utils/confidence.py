@@ -17,6 +17,9 @@ from typing import List, Dict
 from collections import Counter
 from .extractor import extract_answer
 from .execute_code import extract_and_run_python_code
+from dynamic_cheatsheet.utils import execute_code
+
+TRUST_SCORE_THRESHOLD = 0.5
 
 
 class ConfidenceScorer:
@@ -70,20 +73,26 @@ class ConfidenceScorer:
             max_tokens=max_tokens
         )
 
+        ensemble_answers = ensemble_result['ensemble_answers']
+        original_agreement = (
+            sum(1 for a in ensemble_answers if a == original_answer) / len(ensemble_answers)
+            if len(ensemble_answers) > 0 else 0.0
+        )
+
         signals = {
-            'ensemble_agreement': ensemble_result['agreement']
+            'ensemble_agreement': original_agreement
         }
 
         # Optional answer parseability check (currently not used)
         answer_parseable = 1.0 if original_answer != "No final answer found" else 0.0
         signals['answer_parseable'] = answer_parseable
 
-        trust_score = ensemble_result['agreement']
+        trust_score = original_agreement
 
         return {
             'trust_score': trust_score,
-            'ensemble_answers': ensemble_result['ensemble_answers'],
-            'agreement': ensemble_result['agreement'],
+            'ensemble_answers': ensemble_answers,
+            'agreement': original_agreement,
             'most_common_answer': ensemble_result['most_common_answer'],
             'signals': signals
         }
@@ -120,7 +129,7 @@ class ConfidenceScorer:
                     messages=prompt,
                     temperature=temp,
                     max_completion_tokens=max_tokens,
-                    # Note: We don't execute code for ensemble samples (too expensive)
+                    execute_code=True
                 )
                 response_text = response.choices[0].message["content"]
                 ensemble_responses.append(response_text)

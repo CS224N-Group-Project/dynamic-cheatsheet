@@ -4,7 +4,7 @@ from typing import List, Tuple
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
 from .utils.extractor import extract_answer, extract_cheatsheet
-from .utils.confidence import ConfidenceScorer, compute_rerank_score
+from .utils.confidence import ConfidenceScorer, compute_rerank_score, TRUST_SCORE_THRESHOLD
 from litellm import completion
 from functools import partial
 
@@ -458,7 +458,10 @@ class LanguageModel:
 
                     # Use rerank_scores instead of similarities for top-k selection
                     top_k_indices = np.argsort(rerank_scores)[::-1][:retrieve_top_k]
-                
+
+                    # Filter out retrieved items with trust_score below threshold
+                    top_k_indices = [i for i in top_k_indices if trust_scores[i] >= TRUST_SCORE_THRESHOLD]
+
                 top_k_original_inputs = [original_input_corpus[i] for i in top_k_indices]
                 top_k_original_outputs = [generator_outputs_so_far[i] for i in top_k_indices]
                 top_k_similar_values = similarities[0][top_k_indices]

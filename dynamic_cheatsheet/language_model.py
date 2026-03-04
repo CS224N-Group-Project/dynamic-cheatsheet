@@ -6,9 +6,11 @@ from typing import List, Tuple
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
 from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items
+import litellm
 from litellm import completion, embedding as litellm_embedding
 from litellm.exceptions import RateLimitError
 from functools import partial
+litellm.drop_params = True
 
 class LanguageModel:
     def __init__(self,
@@ -52,6 +54,9 @@ class LanguageModel:
             "together_ai/Qwen/Qwen2.5-72B-Instruct-Turbo",
             "gemini/gemini-2.0-flash",
             "ollama/llama3:70b",
+            "xai/grok-3",
+            "xai/grok-3-mini",
+            "xai/grok-4-fast-non-reasoning",
         ]:
             self.client = partial(completion, model=self.model_name)
         else:

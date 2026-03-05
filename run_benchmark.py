@@ -180,9 +180,16 @@ def main(args: argparse.Namespace):
     retrieval_tag = ""
     if args.approach_name in _retrieval_approaches:
         retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
-    _safe_model_name = args.model_name.replace("/", "-")
+    _model_parts = args.model_name.split("/")
+    if len(_model_parts) == 2:
+        _provider, _model_slug = _model_parts
+        _save_dir = f"{args.save_directory}/{args.task}/{_provider}"
+        _safe_model_name = _model_slug
+    else:
+        _save_dir = f"{args.save_directory}/{args.task}"
+        _safe_model_name = args.model_name
     _flag = f"_{args.additional_flag_for_save_path}" if args.additional_flag_for_save_path else ""
-    args.save_path_name = f"{args.save_directory}/{args.task}/{_safe_model_name}_{args.approach_name}{retrieval_tag}{_flag}.jsonl"
+    args.save_path_name = f"{_save_dir}/{_safe_model_name}_{args.approach_name}{retrieval_tag}{_flag}.jsonl"
     os.makedirs(os.path.dirname(args.save_path_name), exist_ok=True)
 
     save_param_path = args.save_path_name.replace(".jsonl", "_params.json")

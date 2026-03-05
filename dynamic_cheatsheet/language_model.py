@@ -5,7 +5,7 @@ import tiktoken
 from typing import List, Tuple
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
-from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items
+from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items, extract_memory_updates
 import litellm
 from litellm import completion, embedding as litellm_embedding
 from litellm.exceptions import RateLimitError
@@ -71,6 +71,27 @@ class LanguageModel:
         """
         tokens = self.gpt4Tokenizer.encode(text)
         return len(tokens)
+
+    # Added By Jerry Gu
+    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        Embed a list of strings in a single API call.
+
+        Arguments:
+            texts : List[str] : The strings to embed.
+
+        Returns:
+            List[List[float]] : One embedding vector per input string, in the same order.
+        """
+        if not texts:
+            return []
+        response = litellm_embedding(
+            model="openai/text-embedding-3-small",
+            input=texts,
+        )
+        # litellm returns data sorted by index; sort defensively anyway
+        ordered = sorted(response.data, key=lambda d: d["index"])
+        return [d["embedding"] for d in ordered]
 
     # Added By Jerry Gu
     def _embed_text(self, text: str) -> List[float]:
@@ -197,6 +218,51 @@ class LanguageModel:
             retrieve_prob=prob,
         )
         return [memory_store[i] for i in selected_indices]
+
+    # Added By Jerry Gu — JSON Memory approach
+    def _retrieve_dual_top_k(
+        self,
+        query_embedding: List[float],
+        memory_store: List[dict],
+        k: int,
+    ) -> List[dict]:
+        """
+        Retrieve the top-k items by problem_embedding similarity and the top-k by
+        strategy_embedding similarity, then union and deduplicate by unique_id.
+
+        Returns at most 2k items. If fewer than k items exist the full store is returned.
+
+        Arguments:
+            query_embedding  : List[float] : Embedding of the current input question.
+            memory_store     : List[dict]  : Items with "problem_embedding", "strategy_embedding",
+                                             and "unique_id" fields.
+            k                : int         : Number of top items to retrieve per embedding type.
+
+        Returns:
+            List[dict] : Deduplicated list of retrieved memory items.
+        """
+        if not memory_store:
+            return []
+
+        problem_matrix  = np.array([item["problem_embedding"]  for item in memory_store])
+        strategy_matrix = np.array([item["strategy_embedding"] for item in memory_store])
+
+        problem_sims  = cosine_similarity([query_embedding], problem_matrix)[0]
+        strategy_sims = cosine_similarity([query_embedding], strategy_matrix)[0]
+
+        top_k = min(k, len(memory_store))
+        problem_indices  = np.argsort(problem_sims)[::-1][:top_k].tolist()
+        strategy_indices = np.argsort(strategy_sims)[::-1][:top_k].tolist()
+
+        seen_ids: set = set()
+        retrieved: List[dict] = []
+        for idx in problem_indices + strategy_indices:
+            uid = memory_store[idx]["unique_id"]
+            if uid not in seen_ids:
+                seen_ids.add(uid)
+                retrieved.append(memory_store[idx])
+
+        return retrieved
 
     def generate(self,
         history: List[str],
@@ -664,6 +730,160 @@ class LanguageModel:
                 "final_answer": generator_answer,
                 "final_output": generator_output,
                 "final_cheatsheet": new_cheatsheet,                               # text-only — saved to JSONL
+                "final_cheatsheet_with_embeddings": new_cheatsheet_with_embeddings,  # popped by run_benchmark, never saved
+                "memory_store_text": memory_store_text,
+                "memory_store_size": len(memory_store),
+            }
+        elif approach_name == "DynamicCheatsheet_JSON_Memory":       # Added By Jerry Gu
+            # --- Deserialize memory store ---
+            # cheatsheet on disk is a JSON array of {unique_id, strategy, example_problem}.
+            # In-memory it additionally carries strategy_embedding and problem_embedding.
+            if cheatsheet is None or cheatsheet == "(empty)":
+                memory_store = []
+            else:
+                try:
+                    memory_store = json.loads(cheatsheet)
+                except Exception:
+                    memory_store = []
+
+            # --- Step 1: Retrieve top-k items via dual embedding ---
+            query_embedding = self._embed_text(input_txt)
+            retrieved_items = self._retrieve_dual_top_k(query_embedding, memory_store, retrieve_top_k)
+
+            # --- Step 2: Generator ---
+            # Present strategies as plain <strategy> blocks — no JSON, no IDs.
+            if retrieved_items:
+                retrieved_strategies_text = "\n\n".join(
+                    f"<strategy>\n{item['strategy']}\n</strategy>" for item in retrieved_items
+                )
+            else:
+                retrieved_strategies_text = "(empty)"
+
+            generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", retrieved_strategies_text)
+            generator_history = [{"role": "user", "content": generator_prompt}]
+            generator_output = self.generate(
+                history=generator_history,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                allow_code_execution=allow_code_execution,
+                code_execution_flag=code_execution_flag,
+            )
+            generator_answer = extract_answer(generator_output)
+
+            # --- Step 3: Curator ---
+            # Curator sees only unique_id + strategy for retrieved items.
+            # example_problem is intentionally withheld.
+            curator_retrieved_json = json.dumps(
+                [{"unique_id": item["unique_id"], "strategy": item["strategy"]} for item in retrieved_items],
+                indent=2,
+            )
+            curator_prompt = (
+                cheatsheet_template
+                .replace("[[RETRIEVED_STRATEGIES]]", curator_retrieved_json)
+                .replace("[[QUESTION]]", input_txt)
+                .replace("[[MODEL_ANSWER]]", generator_output)
+            )
+            curator_history = [{"role": "user", "content": curator_prompt}]
+            curator_output = self.generate(
+                history=curator_history,
+                temperature=temperature,
+                max_tokens=2 * max_tokens,
+                allow_code_execution=False,
+            )
+
+            # --- Step 4: Parse operations ---
+            operations = extract_memory_updates(curator_output)
+
+            # 4a. Capture the global max ID before any mutations so creates never reuse deleted IDs.
+            global_max_id = max((item["unique_id"] for item in memory_store), default=-1)
+
+            # Apply deletes first so that update/create logic sees the post-delete store.
+            delete_ids = {
+                op["unique_id"] for op in operations
+                if op["operation"] == "delete" and "unique_id" in op
+            }
+            memory_store = [item for item in memory_store if item["unique_id"] not in delete_ids]
+
+            # 4b. Separate update and create ops; silently drop malformed entries.
+            update_ops = [
+                op for op in operations
+                if op["operation"] == "update" and "unique_id" in op and "strategy" in op
+            ]
+            create_ops = [
+                op for op in operations
+                if op["operation"] == "create" and "strategy" in op
+            ]
+
+            # 4c. Batch all embedding calls into one API round-trip.
+            #     Layout: [update_strats..., create_strats..., input_txt (if any creates)]
+            texts_to_embed: List[str] = []
+            update_embed_start = 0
+            for op in update_ops:
+                texts_to_embed.append(op["strategy"])
+            create_embed_start = len(texts_to_embed)
+            for op in create_ops:
+                texts_to_embed.append(op["strategy"])
+            problem_embed_idx = None
+            if create_ops:
+                problem_embed_idx = len(texts_to_embed)
+                texts_to_embed.append(input_txt)
+
+            new_embeddings = self._embed_batch(texts_to_embed) if texts_to_embed else []
+
+            # 4d. Apply updates — mutate items in-place via a lookup dict.
+            store_by_id = {item["unique_id"]: item for item in memory_store}
+            for i, op in enumerate(update_ops):
+                uid = op["unique_id"]
+                if uid in store_by_id:
+                    store_by_id[uid]["strategy"] = op["strategy"]
+                    store_by_id[uid]["strategy_embedding"] = new_embeddings[update_embed_start + i]
+                # else: unique_id not found — silently skip per spec
+
+            # 4e. Apply creates — all share the same problem_embedding (same input_txt).
+            problem_emb = new_embeddings[problem_embed_idx] if problem_embed_idx is not None else None
+            next_id = global_max_id + 1
+            for i, op in enumerate(create_ops):
+                memory_store.append({
+                    "unique_id": next_id,
+                    "strategy": op["strategy"],
+                    "example_problem": input_txt,
+                    "strategy_embedding": new_embeddings[create_embed_start + i],
+                    "problem_embedding": problem_emb,
+                })
+                next_id += 1
+
+            # --- Step 5: Serialize ---
+            # Disk version: strip embeddings to keep JSONL files human-readable and small.
+            # In-memory version: retain embeddings so the next call can retrieve without re-embedding.
+            _EMBED_KEYS = {"strategy_embedding", "problem_embedding"}
+            memory_store_clean = [
+                {k: v for k, v in item.items() if k not in _EMBED_KEYS}
+                for item in memory_store
+            ]
+            new_cheatsheet = json.dumps(memory_store_clean)
+            new_cheatsheet_with_embeddings = json.dumps(memory_store)
+            memory_store_text = "\n\n".join(item["strategy"] for item in memory_store) if memory_store else "(empty)"
+
+            return {
+                "input_txt": input_txt,
+                "steps": [
+                    {
+                        "round": 0,
+                        "generator_prompt": generator_prompt,
+                        "generator_output": generator_output,
+                        "generator_answer": generator_answer,
+                        "retrieved_items": [
+                            {k: v for k, v in item.items() if k not in _EMBED_KEYS}
+                            for item in retrieved_items
+                        ],
+                        "operations_applied": operations,
+                        "current_cheatsheet": retrieved_strategies_text,
+                        "new_cheatsheet": memory_store_text,
+                    }
+                ],
+                "final_answer": generator_answer,
+                "final_output": generator_output,
+                "final_cheatsheet": new_cheatsheet,                              # text-only — saved to JSONL
                 "final_cheatsheet_with_embeddings": new_cheatsheet_with_embeddings,  # popped by run_benchmark, never saved
                 "memory_store_text": memory_store_text,
                 "memory_store_size": len(memory_store),

@@ -165,7 +165,7 @@ def main(args: argparse.Namespace):
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
-    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev"]:
+    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all"]:
         dataset = load_from_disk(f"data/{args.task}")
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
@@ -302,7 +302,7 @@ def main(args: argparse.Namespace):
         elif args.task == "MathEquationBalancer":
             # Add a specific format to the input for the MathEquationBalancer task
             input = f"Below is an equation with missing operators. Your task is to fill in the blanks with the correct mathematical operators: +, -, *, or /. Ensure that the equation is correct once the operators are added. The operators should be placed in the sequence they appear from left to right. Include the full equation with the operators filled in. For instance, for the equation 1 ? 2 ? 3 = 6, the correct answer is 1 + 2 + 3 = 6.\n\nEquation: {input}"
-        elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
+        elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all"]:
             problem_type = dataset[idx]["type"]
             if problem_type == "relation":
                 import json as _json
@@ -357,7 +357,7 @@ def main(args: argparse.Namespace):
                 **output_dict,
             }
         # Save extra metadata for IneqMath leaderboard submission
-        if args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
+        if args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all"]:
             output_record["data_id"] = dataset[idx]["data_id"]
             output_record["problem_type"] = dataset[idx]["type"]
         outputs.append(output_record)
@@ -381,7 +381,7 @@ def main(args: argparse.Namespace):
             result = eval_for_multiple_choice(input, final_answer, original_target)
         elif args.task == "MathEquationBalancer":
             result = eval_equation_balancer(original_input, final_answer, original_target)
-        elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev"]:
+        elif args.task in ["IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all"]:
             problem_type = dataset[idx]["type"]
             choices_json = dataset[idx]["choices"]
             result = eval_for_ineqmath(problem_type, final_answer, original_target, choices_json, args.model_name)

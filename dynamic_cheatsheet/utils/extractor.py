@@ -107,6 +107,51 @@ def extract_all_memory_items(text: str) -> list:
     return items
 
 
+# Added by Jerry Gu — JSON Memory approach
+def extract_memory_updates(response: str) -> list:
+    """
+    Parses curator output for DynamicCheatsheet_JSON_Memory.
+
+    Extracts the JSON array inside <memory_updates>...</memory_updates> tags and
+    returns it as a list of operation dicts.  Each valid dict must have an
+    "operation" key whose value is one of "create", "update", or "delete".
+    Malformed entries and any dict missing "operation" are silently dropped.
+
+    Arguments:
+        response : str : The full curator model output.
+
+    Returns:
+        list : A (possibly empty) list of validated operation dicts.
+    """
+    import json as _json
+
+    VALID_OPS = {"create", "update", "delete"}
+
+    response = response.strip()
+    if "<memory_updates>" not in response:
+        return []
+
+    try:
+        inner = response.split("<memory_updates>")[1].split("</memory_updates>")[0].strip()
+        raw = _json.loads(inner)
+    except Exception:
+        return []
+
+    if not isinstance(raw, list):
+        return []
+
+    validated = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        op = entry.get("operation", "")
+        if op not in VALID_OPS:
+            continue
+        validated.append(entry)
+
+    return validated
+
+
 def extract_solution(
     response: str,
     header: str = "SOLUTION EVALUATION:",

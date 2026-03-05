@@ -142,8 +142,13 @@ def main(args: argparse.Namespace):
 
     # Read the prompt files
     args.generator_prompt = read_file(args.generator_prompt_path)
+    _DEFAULT_CURATOR_PROMPTS = {
+        "DynamicCheatsheet_JSON_Memory": "prompts/curator_prompt_json_memory.txt",
+    }
     if args.cheatsheet_prompt_path:
         args.cheatsheet_prompt = read_file(args.cheatsheet_prompt_path)
+    elif args.approach_name in _DEFAULT_CURATOR_PROMPTS:
+        args.cheatsheet_prompt = read_file(_DEFAULT_CURATOR_PROMPTS[args.approach_name])
     else:
         args.cheatsheet_prompt = "(empty)"
 
@@ -171,13 +176,20 @@ def main(args: argparse.Namespace):
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
     
     # Build the deterministic save path (always, up front)
-    _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval"}
+    _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval", "DynamicCheatsheet_JSON_Memory"}
     retrieval_tag = ""
     if args.approach_name in _retrieval_approaches:
         retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
-    _safe_model_name = args.model_name.replace("/", "-")
+    _model_parts = args.model_name.split("/")
+    if len(_model_parts) == 2:
+        _provider, _model_slug = _model_parts
+        _save_dir = f"{args.save_directory}/{args.task}/{_provider}"
+        _safe_model_name = _model_slug
+    else:
+        _save_dir = f"{args.save_directory}/{args.task}"
+        _safe_model_name = args.model_name
     _flag = f"_{args.additional_flag_for_save_path}" if args.additional_flag_for_save_path else ""
-    args.save_path_name = f"{args.save_directory}/{args.task}/{_safe_model_name}_{args.approach_name}{retrieval_tag}{_flag}.jsonl"
+    args.save_path_name = f"{_save_dir}/{_safe_model_name}_{args.approach_name}{retrieval_tag}{_flag}.jsonl"
     os.makedirs(os.path.dirname(args.save_path_name), exist_ok=True)
 
     save_param_path = args.save_path_name.replace(".jsonl", "_params.json")
@@ -236,6 +248,25 @@ def main(args: argparse.Namespace):
                 print(f"Re-embedding {len(_resume_store)} memory items for resume...")
                 for _item in _resume_store:
                     _item["embedding"] = model._embed_text(_item["text"])
+                cheatsheet = json.dumps(_resume_store)
+
+        # Re-embed memory store on resume for JSON Memory (two embeddings per item: strategy + problem)
+        elif args.approach_name == "DynamicCheatsheet_JSON_Memory" and cheatsheet not in (None, "(empty)"):
+            try:
+                _resume_store = json.loads(cheatsheet)
+            except Exception:
+                _resume_store = []
+            if _resume_store:
+                print(f"Re-embedding {len(_resume_store)} memory items for resume (JSON Memory)...")
+                # Batch all texts in one API call: [strategy_0, problem_0, strategy_1, problem_1, ...]
+                _all_texts = []
+                for _item in _resume_store:
+                    _all_texts.append(_item["strategy"])
+                    _all_texts.append(_item["example_problem"])
+                _all_embeddings = model._embed_batch(_all_texts)
+                for i, _item in enumerate(_resume_store):
+                    _item["strategy_embedding"] = _all_embeddings[2 * i]
+                    _item["problem_embedding"]  = _all_embeddings[2 * i + 1]
                 cheatsheet = json.dumps(_resume_store)
 
         generator_outputs_so_far = [output["final_output"] for output in outputs]
@@ -366,9 +397,19 @@ def main(args: argparse.Namespace):
 
         ## FOR DEBUGGING PURPOSES
         # import pdb; pdb.set_trace()
-        print(f"@ CHEATSHEET:\n{cheatsheet}")
+        if args.approach_name == "DynamicCheatsheet_JSON_Memory" and output_dict.get("steps"):
+            _step = output_dict["steps"][0]
+            _ops  = _step.get("operations_applied", [])
+            _n_create = sum(1 for o in _ops if o.get("operation") == "create")
+            _n_update = sum(1 for o in _ops if o.get("operation") == "update")
+            _n_delete = sum(1 for o in _ops if o.get("operation") == "delete")
+            print(f"@ JSON MEMORY — Operations: {_n_create} create | {_n_update} update | {_n_delete} delete  "
+                  f"(store size: {output_dict.get('memory_store_size', '?')})")
+            print(f"@ MEMORY STORE (strategies):\n{output_dict.get('memory_store_text', '(empty)')}")
+        else:
+            print(f"@ CHEATSHEET:\n{cheatsheet}")
         print('- ' * 50)
-        print(f"Input: {input}")        
+        print(f"Input: {input}")
         print(f"Target: {original_target}")
         print(f"Final answer: {final_answer}")
         print("**" * 50)

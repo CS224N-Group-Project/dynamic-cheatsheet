@@ -114,6 +114,41 @@ def normalize_cli_args(argv):
     return normalized
 
 
+def _build_datasir_from_gz(
+    gz_path: str = "data/DataSIR/DataSIR.json.gz",
+    dst: str = "data/DataSIR",
+) -> None:
+    """
+    Build the HuggingFace Dataset from the compressed source file.
+    Called automatically on first use when the arrow files are absent.
+    """
+    import gzip, json as _json
+    from datasets import Dataset, Features, Value
+
+    print(f"[DataSIR] Building dataset from {gz_path} (first-time setup, ~30 s)...")
+    with gzip.open(gz_path, "rt", encoding="utf-8") as f:
+        raw = _json.load(f)
+    rows = [
+        {
+            "input":           r["Encoded_data"],
+            "target":          r["Sensitive_data"],
+            "original_data":   r["Original_data"],
+            "encoding_method": r["Encoding_method"],
+            "data_type":       r["Data_type"],
+        }
+        for r in raw
+    ]
+    features = Features({
+        "input":           Value("string"),
+        "target":          Value("string"),
+        "original_data":   Value("string"),
+        "encoding_method": Value("string"),
+        "data_type":       Value("string"),
+    })
+    Dataset.from_list(rows, features=features).save_to_disk(dst)
+    print(f"[DataSIR] Saved {len(rows):,} examples to {dst}/")
+
+
 def main(args: argparse.Namespace):
     """
     Main function to run the benchmark.
@@ -172,6 +207,8 @@ def main(args: argparse.Namespace):
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
     elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all", "DataSIR"]:
+        if args.task == "DataSIR" and not os.path.exists("data/DataSIR/data-00000-of-00001.arrow"):
+            _build_datasir_from_gz()
         dataset = load_from_disk(f"data/{args.task}")
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")

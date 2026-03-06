@@ -389,6 +389,26 @@ def eval_for_ineqmath(
     return _verify_bound_with_llm(pred_clean, target_clean, model)
 
 
+DATASIR_CATEGORIES = [
+    "Address", "Date/Time", "Driver's License", "Email", "IMEI", "IMSI",
+    "IPv4", "IPv6", "JDBC Connection", "Landline Number", "MAC", "MEID",
+    "Marital Status", "Medical History", "Mobile Number", "Name",
+    "Nationality", "Occupation", "Organization", "Party", "Passport",
+    "Personal ID", "Postcode", "Religion", "Transaction Amount", "URL",
+]
+
+
+def eval_for_datasir(output: str, target: str) -> bool:
+    """
+    Check if the model's answer names the correct sensitive-data category.
+    Accepts a match if the target category string appears in the output
+    (case-insensitive).
+    """
+    if not output or not target:
+        return False
+    return target.lower() in output.lower()
+
+
 def eval_for_pyton_programming_puzzles(input: str, output: str) -> bool:
     """
     Evaluate if the output is a valid Python programming puzzle solution.

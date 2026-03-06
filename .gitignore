@@ -162,3 +162,7 @@ cython_debug/
 #.idea/
 .python-version
 config.env
+
+# Large dataset files — download via Kaggle and run prepare_*.py locally
+data/DataSIR/DataSIR.json
+data/DataSIR/*.arrow

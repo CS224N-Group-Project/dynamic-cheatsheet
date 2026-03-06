@@ -130,6 +130,7 @@ def main(args: argparse.Namespace):
             eval_for_GameOf24,
             eval_for_ineqmath,
             eval_for_multiple_choice,
+            eval_for_datasir,
         )
     except ModuleNotFoundError as exc:
         missing = exc.name or "a required package"
@@ -170,7 +171,7 @@ def main(args: argparse.Namespace):
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
-    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all"]:
+    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all", "DataSIR"]:
         dataset = load_from_disk(f"data/{args.task}")
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
@@ -343,6 +344,16 @@ def main(args: argparse.Namespace):
                 input = f"{input}\n\nChoices:\n{choices_str}\n\n(Select the correct relation from the choices above. State your final answer as the choice letter, e.g. (A).)"
             else:
                 input = f"{input}\n\n(Provide your final answer as the exact value of the constant, e.g. C = 4.)"
+        elif args.task == "DataSIR":
+            from dynamic_cheatsheet.utils.evaluation import DATASIR_CATEGORIES
+            categories_str = ", ".join(DATASIR_CATEGORIES)
+            input = (
+                f"The following data has been encoded or obfuscated to conceal sensitive personal information. "
+                f"Identify which type of sensitive information it contains.\n\n"
+                f"Encoded data: {orig_input}\n\n"
+                f"Choose exactly one category from this list: {categories_str}.\n"
+                f"State your final answer as the category name only, e.g. 'Email'."
+            )
 
         # Skip the examples that have been already seen in the previous run
         if idx < start_idx:
@@ -426,6 +437,8 @@ def main(args: argparse.Namespace):
             problem_type = dataset[idx]["type"]
             choices_json = dataset[idx]["choices"]
             result = eval_for_ineqmath(problem_type, final_answer, original_target, choices_json, args.model_name)
+        elif args.task == "DataSIR":
+            result = eval_for_datasir(final_answer, original_target)
         else:
             raise ValueError(f"Task {args.task} not supported.")
         

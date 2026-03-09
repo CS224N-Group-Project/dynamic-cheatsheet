@@ -802,16 +802,26 @@ class LanguageModel:
                 op["unique_id"] for op in operations
                 if op["operation"] == "delete" and "unique_id" in op
             }
+            
+            combine_ids_to_delete = {
+                uid 
+                for op in operations 
+                if op["operation"] == "combine" and "unique_ids" in op
+                for uid in op["unique_ids"]
+            }
+            
+            delete_ids.update(combine_ids_to_delete)
+            
             memory_store = [item for item in memory_store if item["unique_id"] not in delete_ids]
 
-            # 4b. Separate update and create ops; silently drop malformed entries.
+            # 4b. Separate update, create, and combine ops; silently drop malformed entries.
             update_ops = [
                 op for op in operations
                 if op["operation"] == "update" and "unique_id" in op and "strategy" in op
             ]
             create_ops = [
                 op for op in operations
-                if op["operation"] == "create" and "strategy" in op
+                if (op["operation"] == "create" or op["operation"] == "combine") and "strategy" in op
             ]
 
             # 4c. Batch all embedding calls into one API round-trip.
@@ -840,6 +850,8 @@ class LanguageModel:
                 # else: unique_id not found — silently skip per spec
 
             # 4e. Apply creates — all share the same problem_embedding (same input_txt).
+            # combines are modeled as delete + create
+            # TODO: for future, consider updating embedding to include previous problem_embeddings from one of the combined strategies, rather than just the one where the strategies were combined
             problem_emb = new_embeddings[problem_embed_idx] if problem_embed_idx is not None else None
             next_id = global_max_id + 1
             for i, op in enumerate(create_ops):
@@ -850,7 +862,7 @@ class LanguageModel:
                     "strategy_embedding": new_embeddings[create_embed_start + i],
                     "problem_embedding": problem_emb,
                 })
-                next_id += 1
+                next_id += 1 
 
             # --- Step 5: Serialize ---
             # Disk version: strip embeddings to keep JSONL files human-readable and small.
@@ -872,6 +884,8 @@ class LanguageModel:
                         "generator_prompt": generator_prompt,
                         "generator_output": generator_output,
                         "generator_answer": generator_answer,
+                        "curator_prompt": curator_prompt,
+                        "curator_output": curator_output,
                         "retrieved_items": [
                             {k: v for k, v in item.items() if k not in _EMBED_KEYS}
                             for item in retrieved_items

@@ -125,7 +125,7 @@ def extract_memory_updates(response: str) -> list:
     """
     import json as _json
 
-    VALID_OPS = {"create", "update", "delete"}
+    VALID_OPS = {"create", "update", "delete", "combine"}
 
     response = response.strip()
     if "<memory_updates>" not in response:

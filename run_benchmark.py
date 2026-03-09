@@ -401,9 +401,10 @@ def main(args: argparse.Namespace):
             _step = output_dict["steps"][0]
             _ops  = _step.get("operations_applied", [])
             _n_create = sum(1 for o in _ops if o.get("operation") == "create")
+            _n_combine = sum(1 for o in _ops if o.get("operation") == "combine")
             _n_update = sum(1 for o in _ops if o.get("operation") == "update")
             _n_delete = sum(1 for o in _ops if o.get("operation") == "delete")
-            print(f"@ JSON MEMORY — Operations: {_n_create} create | {_n_update} update | {_n_delete} delete  "
+            print(f"@ JSON MEMORY — Operations: {_n_create} create | {_n_update} update | {_n_combine} combine | {_n_delete} delete  "
                   f"(store size: {output_dict.get('memory_store_size', '?')})")
             print(f"@ MEMORY STORE (strategies):\n{output_dict.get('memory_store_text', '(empty)')}")
         else:

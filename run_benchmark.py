@@ -72,6 +72,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--additional_flag_for_save_path", default="")
     parser.add_argument("--max_n_samples", type=int, default=-1)
     parser.add_argument("--no_shuffle", type=str_to_bool, nargs="?", const=True, default=False)
+    parser.add_argument("--timestamp", type=str_to_bool, nargs="?", const=True, default=False,
+                        help="Append current datetime to save path to force a fresh run.")
     parser.add_argument("--noise_n", type=int, default=None,
                         help="Number of random noise memory items for IsolatedMemory scenario 2b. Falls back to --retrieve_top_k if not set.")
     parser.add_argument("--pregenerated_memory_path", default=None,
@@ -174,6 +176,9 @@ def main(args: argparse.Namespace):
     # Add a flag to the save path if the code execution is not allowed
     if not args.execute_python_code:
         args.additional_flag_for_save_path += "_no-code-execution"
+
+    if args.timestamp:
+        args.additional_flag_for_save_path += f"_{datetime.today().strftime('%Y-%m-%d-%H%M')}"
 
     # Load the dataset based on the task name
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
@@ -317,10 +322,12 @@ def main(args: argparse.Namespace):
         else:
             pregenerated_memory_items = {}
 
-        # Build the full list of formatted questions (same formatting as the eval loop)
+        # Build the full list of formatted questions and their targets (same formatting as the eval loop)
         all_formatted_questions = []
+        all_targets = []
         for _qi, _example in enumerate(dataset):
             _orig = _example["input"]
+            _target = str(dataset[_qi]["target"])
             if args.task in PREDEFINED_PROMPTS:
                 _q = f"{PREDEFINED_PROMPTS[args.task]}\n\nQuestion #{_qi+1}:\n{_orig}"
             else:
@@ -340,16 +347,17 @@ def main(args: argparse.Namespace):
                 else:
                     _q = f"{_q}\n\n(Provide your final answer as the exact value of the constant, e.g. C = 4.)"
             all_formatted_questions.append(_q)
+            all_targets.append(_target)
             if args.max_n_samples > 0 and _qi == args.max_n_samples - 1:
                 break
 
         # Generate missing memory items
-        missing = [q for q in all_formatted_questions if q not in pregenerated_memory_items]
+        missing = [(q, t) for q, t in zip(all_formatted_questions, all_targets) if q not in pregenerated_memory_items]
         if missing:
             print(f"Generating memory items for {len(missing)} questions...")
-            for _mi, _q in enumerate(missing):
+            for _mi, (_q, _t) in enumerate(missing):
                 print(f"  Pre-generating memory item {_mi+1}/{len(missing)}...")
-                mem_prompt = args.memory_generator_prompt.replace("[[QUESTION]]", _q)
+                mem_prompt = args.memory_generator_prompt.replace("[[QUESTION]]", _q).replace("[[ANSWER]]", _t)
                 mem_output = model.generate(
                     history=[{"role": "user", "content": mem_prompt}],
                     temperature=args.temperature,

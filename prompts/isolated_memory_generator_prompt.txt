@@ -1,0 +1,40 @@
+# MEMORY ITEM GENERATOR
+
+You are an expert problem-solving assistant. Your task is to analyze the given problem and produce a single memory item that captures the key strategies, patterns, and insights that would be most useful for solving it.
+
+**Important:** Do NOT solve the problem. Instead, identify and document the approach, relevant techniques, potential pitfalls, and any reusable patterns that would guide someone toward a correct solution.
+
+---
+
+#### Guidelines
+
+1. Identify the problem type and relevant domain (e.g., combinatorics, algebra, physics, coding, logic).
+2. Describe the most promising solution strategy or strategies.
+3. Include any relevant formulas, algorithms, code patterns, or heuristics.
+4. Note potential edge cases or common mistakes for this type of problem.
+5. If applicable, provide a concise code template or pseudocode that would be useful.
+
+---
+
+#### Output Format
+
+Wrap your output in a `<cheatsheet>` block containing exactly one `<memory_item>`:
+
+```
+<cheatsheet>
+<memory_item>
+<description>
+[Problem type, key observations, and recommended solution approach.]
+</description>
+<example>
+[Relevant formula, code snippet, worked-out similar example, or step-by-step strategy.]
+</example>
+</memory_item>
+</cheatsheet>
+```
+
+---
+
+## PROBLEM
+
+[[QUESTION]]

@@ -1,8 +1,9 @@
 import json
+import random
 import time
 import numpy as np
 import tiktoken
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 from sklearn.metrics.pairwise import cosine_similarity
 from .utils.execute_code import extract_and_run_python_code
 from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items
@@ -315,6 +316,8 @@ class LanguageModel:
         generator_outputs_so_far: List[str] = None,
         retrieve_top_k: int = 3,
         retrieve_prob: float = None,
+        pregenerated_memory_items: Dict[str, str] = None,
+        noise_n: int = 0,
     ) -> Tuple[str, str, str, str]:
         """
         Generate a response from the language model.
@@ -667,6 +670,52 @@ class LanguageModel:
                 "final_cheatsheet_with_embeddings": new_cheatsheet_with_embeddings,  # popped by run_benchmark, never saved
                 "memory_store_text": memory_store_text,
                 "memory_store_size": len(memory_store),
+            }
+        elif approach_name == "IsolatedMemory":
+            if pregenerated_memory_items is None:
+                raise ValueError("pregenerated_memory_items must be provided for IsolatedMemory approach.")
+
+            target_item = pregenerated_memory_items.get(input_txt, "(empty)")
+
+            if noise_n > 0:
+                other_items = [v for k, v in pregenerated_memory_items.items() if k != input_txt]
+                n_sample = min(noise_n, len(other_items))
+                sampled = random.sample(other_items, n_sample) if n_sample > 0 else []
+                combined = sampled + [target_item]
+                random.shuffle(combined)
+                cheatsheet_content = "\n\n".join(combined)
+            else:
+                cheatsheet_content = target_item
+                n_sample = 0
+
+            generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", cheatsheet_content)
+            generator_history = [{"role": "user", "content": generator_prompt}]
+            generator_output = self.generate(
+                history=generator_history,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                allow_code_execution=allow_code_execution,
+                code_execution_flag=code_execution_flag,
+            )
+            generator_answer = extract_answer(generator_output)
+
+            return {
+                "input_txt": input_txt,
+                "steps": [
+                    {
+                        "round": 0,
+                        "generator_prompt": generator_prompt,
+                        "generator_output": generator_output,
+                        "generator_answer": generator_answer,
+                        "current_cheatsheet": cheatsheet_content,
+                        "new_cheatsheet": None,
+                    }
+                ],
+                "final_answer": generator_answer,
+                "final_output": generator_output,
+                "final_cheatsheet": cheatsheet_content,
+                "noise_n": noise_n,
+                "n_items_in_cheatsheet": 1 + n_sample,
             }
         else:
             raise ValueError(f"Approach '{approach_name}' not found.")

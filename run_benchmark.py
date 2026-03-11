@@ -30,6 +30,9 @@ ARGUMENT_FIELDS = [
     "max_n_samples",
     "no_shuffle",
     "prob",
+    "noise_n",
+    "pregenerated_memory_path",
+    "memory_generator_prompt_path",
 ]
 
 
@@ -69,6 +72,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--additional_flag_for_save_path", default="")
     parser.add_argument("--max_n_samples", type=int, default=-1)
     parser.add_argument("--no_shuffle", type=str_to_bool, nargs="?", const=True, default=False)
+    parser.add_argument("--noise_n", type=int, default=None,
+                        help="Number of random noise memory items for IsolatedMemory scenario 2b. Falls back to --retrieve_top_k if not set.")
+    parser.add_argument("--pregenerated_memory_path", default=None,
+                        help="Path to JSON file for saving/loading pre-generated memory items (IsolatedMemory).")
+    parser.add_argument("--memory_generator_prompt_path", default="prompts/isolated_memory_generator_prompt.txt",
+                        help="Prompt template for generating per-question memory items (IsolatedMemory).")
     return parser
 
 
@@ -147,6 +156,11 @@ def main(args: argparse.Namespace):
     else:
         args.cheatsheet_prompt = "(empty)"
 
+    if args.approach_name == "IsolatedMemory":
+        args.memory_generator_prompt = read_file(args.memory_generator_prompt_path)
+    else:
+        args.memory_generator_prompt = None
+
     # Initialize the language model
     model = LanguageModel(
         model_name=args.model_name,
@@ -170,11 +184,17 @@ def main(args: argparse.Namespace):
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
     
+    # Resolve noise_n: explicit --noise_n takes priority, else fall back to --retrieve_top_k
+    if args.noise_n is None:
+        args.noise_n = args.retrieve_top_k
+
     # Build the deterministic save path (always, up front)
     _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval"}
     retrieval_tag = ""
     if args.approach_name in _retrieval_approaches:
         retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
+    elif args.approach_name == "IsolatedMemory":
+        retrieval_tag = f"_noise{args.noise_n}"
     _safe_model_name = args.model_name.replace("/", "-")
     _flag = f"_{args.additional_flag_for_save_path}" if args.additional_flag_for_save_path else ""
     args.save_path_name = f"{args.save_directory}/{args.task}/{_safe_model_name}_{args.approach_name}{retrieval_tag}{_flag}.jsonl"
@@ -278,7 +298,72 @@ def main(args: argparse.Namespace):
     else:
         questions = [example["input"] for example in dataset]  # type: ignore[index]
 
-    
+    # IsolatedMemory: pre-generate (or load) one memory item per question
+    pregenerated_memory_items = None
+    if args.approach_name == "IsolatedMemory":
+        from dynamic_cheatsheet.utils.extractor import extract_all_memory_items, extract_cheatsheet
+
+        if args.pregenerated_memory_path:
+            memory_path = args.pregenerated_memory_path
+        else:
+            memory_path = f"{args.save_directory}/{args.task}/{_safe_model_name}_pregenerated_memory.json"
+
+        os.makedirs(os.path.dirname(memory_path), exist_ok=True)
+
+        if os.path.exists(memory_path):
+            with open(memory_path, "r") as f:
+                pregenerated_memory_items = json.load(f)
+            print(f"Loaded {len(pregenerated_memory_items)} pre-generated memory items from {memory_path}.")
+        else:
+            pregenerated_memory_items = {}
+
+        # Build the full list of formatted questions (same formatting as the eval loop)
+        all_formatted_questions = []
+        for _qi, _example in enumerate(dataset):
+            _orig = _example["input"]
+            if args.task in PREDEFINED_PROMPTS:
+                _q = f"{PREDEFINED_PROMPTS[args.task]}\n\nQuestion #{_qi+1}:\n{_orig}"
+            else:
+                _q = f"Question #{_qi+1}:\n{_orig}"
+            if args.task in ("AIME_2020_2024", "AIME_2024", "AIME_2025"):
+                _q = f"{_q} (Please provide your answer in the form of an integer, e.g., 1234, with no Markdown formatting or additional text; make sure to pay attention to the desired format of the final answer though.)"
+            elif args.task == "MathEquationBalancer":
+                _q = f"Below is an equation with missing operators. Your task is to fill in the blanks with the correct mathematical operators: +, -, *, or /. Ensure that the equation is correct once the operators are added. The operators should be placed in the sequence they appear from left to right. Include the full equation with the operators filled in. For instance, for the equation 1 ? 2 ? 3 = 6, the correct answer is 1 + 2 + 3 = 6.\n\nEquation: {_q}"
+            elif args.task in ("IneqMath", "IneqMath_test", "IneqMath_dev"):
+                _ptype = dataset[_qi]["type"]
+                if _ptype == "relation":
+                    import json as _json
+                    _choices_raw = dataset[_qi]["choices"]
+                    _choices = _json.loads(_choices_raw) if _choices_raw else []
+                    _choices_str = "\n".join(_choices) if _choices else ""
+                    _q = f"{_q}\n\nChoices:\n{_choices_str}\n\n(Select the correct relation from the choices above. State your final answer as the choice letter, e.g. (A).)"
+                else:
+                    _q = f"{_q}\n\n(Provide your final answer as the exact value of the constant, e.g. C = 4.)"
+            all_formatted_questions.append(_q)
+            if args.max_n_samples > 0 and _qi == args.max_n_samples - 1:
+                break
+
+        # Generate missing memory items
+        missing = [q for q in all_formatted_questions if q not in pregenerated_memory_items]
+        if missing:
+            print(f"Generating memory items for {len(missing)} questions...")
+            for _mi, _q in enumerate(missing):
+                print(f"  Pre-generating memory item {_mi+1}/{len(missing)}...")
+                mem_prompt = args.memory_generator_prompt.replace("[[QUESTION]]", _q)
+                mem_output = model.generate(
+                    history=[{"role": "user", "content": mem_prompt}],
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    allow_code_execution=False,
+                )
+                mem_cheatsheet = extract_cheatsheet(mem_output, old_cheatsheet="(empty)")
+                mem_items = extract_all_memory_items(mem_cheatsheet)
+                pregenerated_memory_items[_q] = "\n\n".join(mem_items) if mem_items else mem_cheatsheet
+
+            with open(memory_path, "w") as f:
+                json.dump(pregenerated_memory_items, f, indent=2)
+            print(f"Saved {len(pregenerated_memory_items)} memory items to {memory_path}.")
+
     start_idx = len(outputs)
     correct_so_far = 0
     total_so_far = 0
@@ -342,6 +427,8 @@ def main(args: argparse.Namespace):
             generator_outputs_so_far=generator_outputs_so_far,
             retrieve_top_k=args.retrieve_top_k,
             retrieve_prob=args.prob,
+            pregenerated_memory_items=pregenerated_memory_items,
+            noise_n=args.noise_n,
         )
 
         generator_outputs_so_far.append(output_dict["final_output"])

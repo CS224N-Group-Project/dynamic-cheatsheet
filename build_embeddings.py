@@ -30,7 +30,7 @@ def embed_text(text: str, retries: int = 8) -> list[float]:
             )
             return response.data[0]["embedding"]
         except RateLimitError as e:
-            wait = min(2 ** attempt * 5, 120)
+            wait = min(2 ** attempt * 5, 7200)
             print(f"Rate limit hit, retrying in {wait}s... ({e})")
             time.sleep(wait)
     raise RateLimitError("Max retries exceeded due to rate limiting.")

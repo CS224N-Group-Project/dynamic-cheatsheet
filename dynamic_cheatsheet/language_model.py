@@ -308,7 +308,7 @@ class LanguageModel:
                 ).choices[0].message["content"]
                 break
             except RateLimitError as e:
-                wait = min(2 ** _attempt * 5, 120)
+                wait = min(2 ** _attempt * 5, 7200)
                 print(f"Rate limit hit, retrying in {wait}s... ({e})")
                 time.sleep(wait)
         else:

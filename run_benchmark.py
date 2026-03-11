@@ -315,12 +315,14 @@ def main(args: argparse.Namespace):
         print(f"Most recent cheatsheet: {cheatsheet}")
         print("-" * 50)
 
-    # Split the dataset by taking the first n samples
-    # dataset = dataset.select(range(args.max_n_samples))
-
     # Shuffle the dataset if the no_shuffle flag is not set
     if not args.no_shuffle:
         dataset = dataset.shuffle(seed=10)
+
+    # Truncate to max_n_samples before building the embeddings index so that
+    # the lookup only needs to cover the samples actually used in this run.
+    if args.max_n_samples > 0:
+        dataset = dataset.select(range(args.max_n_samples))
 
     # Initialize the questions and the embeddings
     questions = None

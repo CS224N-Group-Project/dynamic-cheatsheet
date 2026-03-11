@@ -3,6 +3,9 @@
 build_embeddings.py --task <name>
 Pre-compute text-embedding-3-small embeddings for a dataset and save to
 embeddings/<task>.csv, matching the format expected by run_benchmark.py.
+
+Shuffle and sample options mirror run_benchmark.py defaults (seed=10) so
+the embedded subset exactly matches what the benchmark will iterate over.
 """
 
 import argparse
@@ -36,11 +39,26 @@ def embed_text(text: str, retries: int = 8) -> list[float]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build embeddings CSV for a dataset.")
     parser.add_argument("--task", required=True, help="Dataset name under data/")
+    parser.add_argument("--max_n_samples", type=int, default=-1,
+                        help="Embed only the first N samples after shuffling "
+                             "(use the same value as --max_n_samples in run_benchmark.py). "
+                             "-1 means embed all.")
+    parser.add_argument("--seed", type=int, default=10,
+                        help="Shuffle seed (must match run_benchmark.py, default 10).")
+    parser.add_argument("--no_shuffle", action="store_true",
+                        help="Skip shuffling (must match run_benchmark.py --no_shuffle).")
     args = parser.parse_args()
 
     load_dotenv("config.env")
 
     dataset = load_from_disk(f"data/{args.task}")
+
+    if not args.no_shuffle:
+        dataset = dataset.shuffle(seed=args.seed)
+
+    if args.max_n_samples > 0:
+        dataset = dataset.select(range(args.max_n_samples))
+        print(f"Using {len(dataset)} samples (shuffled with seed={args.seed}).")
 
     out_path = Path("embeddings") / f"{args.task}.csv"
     out_path.parent.mkdir(exist_ok=True)

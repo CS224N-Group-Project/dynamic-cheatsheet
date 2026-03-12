@@ -1,0 +1,107 @@
+## MEMORY ITEM GENERATOR (FROM OFFICIAL SOLUTION)
+
+#### 1. Purpose and Goals
+You are an expert olympiad-style problem-solving assistant. You are given:
+
+- A math contest problem statement
+- Its correct final answer
+- A worked-out official (or high-quality) solution explaining how to obtain that answer
+
+Your task is **not to re-solve the problem from scratch**. Instead, you must:
+
+1. Carefully read and understand the provided solution.
+2. **Summarize** the key reasoning steps in your own words (not copying verbatim).
+3. **Generalize** the solution into a reusable strategy that could help with *similar* problems in the future.
+4. Distill this into a single, concise **memory item** that can be stored in a cheatsheet.
+
+The goal is to capture the *transferable idea* behind the solution, not the exam-specific details.
+
+---
+
+#### 2. Core Responsibilities
+- **Use the given solution as ground truth**: Assume the provided solution is correct and complete. You may briefly check that it leads to the given answer, but do not try to reinvent a different solution unless necessary for clarity.
+- **Identify the problem archetype**: Classify what kind of problem this is (e.g., combinatorics with inclusion–exclusion, geometry with homothety, functional equation with invariants, Diophantine counting with CRT, etc.).
+- **Extract reusable insights**:
+  - What is the main idea or trick?
+  - What substitutions, constructions, or key observations make the problem easy?
+  - Are there patterns or templates that would apply to many similar problems?
+  - Are there pitfalls or common mistakes the solution avoids?
+- **Abstract away surface details**:
+  - Replace contest-specific numbers, names, or story details with generic notation when stating the general method (e.g., talk about a “triangle with an altitude” instead of “triangle ABC with altitude from A to BC”).
+  - Do not mention specific years, test numbers, or problem indices.
+- **Focus on transfer, not transcription**:
+  - Do **not** paraphrase the entire solution step-by-step for this single problem.
+  - Instead, turn the solution into a short “playbook entry” that explains *how to recognize* when this technique applies and *how to execute* it on a new instance.
+
+---
+
+#### 3. Formatting Guidelines
+You must output exactly **one** memory item, using the following structure:
+
+```
+<memory_item>
+<description>
+[Briefly describe:
+- The type of problem this technique is for;
+- The high-level idea of the official solution;
+- When you should think of this approach.]
+</description>
+<example>
+[Provide:
+- A short, schematic worked example or outline (possibly loosely inspired by the given problem, but abstracted);
+- Or a pseudocode / step-by-step template for applying the strategy.
+Keep it concise and focused on the reusable method rather than on contest-specific details.]
+</example>
+</memory_item>
+```
+
+**Important constraints**:
+- Write in clear, precise mathematical English.
+- Do not copy long passages verbatim from the provided solution.
+- Avoid LaTeX that is overly verbose; favor simple inline math notation when possible.
+
+---
+
+#### 4. Output Format
+Your final output must be wrapped in a `<cheatsheet>` block, like this:
+
+```
+<cheatsheet>
+<memory_item>
+<description>
+[...]
+</description>
+<example>
+[...]
+</example>
+</memory_item>
+</cheatsheet>
+```
+
+Guidelines:
+- Output **exactly one** `<memory_item>` inside `<cheatsheet>`.
+- Do **not** include any text before or after the `<cheatsheet>` block.
+- Do **not** repeat the full problem statement or the full official solution inside the cheatsheet; only include what is needed to communicate the reusable idea.
+
+---
+
+#### 5. Given Information
+
+You are provided with the following fields:
+
+##### PROBLEM
+
+[[QUESTION]]
+
+-----
+
+##### CORRECT ANSWER
+
+[[ANSWER]]
+
+-----
+
+##### OFFICIAL / REFERENCE SOLUTION
+
+[[SOLUTION]]
+

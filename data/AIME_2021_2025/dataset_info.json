@@ -1,0 +1,30 @@
+{
+  "citation": "",
+  "description": "AIME 2021\u20132025 problems with solutions (from hamishivi/aime-2021-2025 on Hugging Face).",
+  "features": {
+    "input": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "metadata": {
+      "ID": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "Solution": {
+        "dtype": "string",
+        "_type": "Value"
+      },
+      "url": {
+        "dtype": "string",
+        "_type": "Value"
+      }
+    }
+  },
+  "homepage": "https://huggingface.co/datasets/hamishivi/aime-2021-2025",
+  "license": ""
+}

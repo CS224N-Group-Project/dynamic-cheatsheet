@@ -27,15 +27,20 @@ def load_split(filename: str) -> list[dict]:
 def normalize(records: list[dict]) -> pd.DataFrame:
     rows = []
     for r in records:
-        row = {}
-        for col in TARGET_FEATURES:
-            val = r.get(col, "")
-            if val is None:
-                val = ""
-            if not isinstance(val, str):
-                val = json.dumps(val)
-            row[col] = val
-        rows.append(row)
+        choices = r.get("choices", "")
+        if not isinstance(choices, str):
+            choices = json.dumps(choices)
+        solution = r.get("solution", "")
+        if not isinstance(solution, str):
+            solution = json.dumps(solution)
+        rows.append({
+            "input":    r.get("problem", ""),
+            "target":   r.get("answer", ""),
+            "data_id":  str(r.get("data_id", "")),
+            "type":     r.get("type", ""),
+            "choices":  choices,
+            "solution": solution,
+        })
     return pd.DataFrame(rows)
 
 print("Downloading train split...")
@@ -48,6 +53,10 @@ print(f"  dev:   {len(dev_records)} records")
 
 df = pd.concat([normalize(train_records), normalize(dev_records)], ignore_index=True)
 print(f"merged: {len(df)} rows")
+
+before = len(df)
+df = df[df["target"].str.strip() != ""].reset_index(drop=True)
+print(f"dropped {before - len(df)} unlabeled rows → {len(df)} rows with labels")
 
 merged = Dataset.from_pandas(df, features=TARGET_FEATURES)
 merged.save_to_disk("data/IneqMath_all")

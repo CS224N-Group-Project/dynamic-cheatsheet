@@ -34,6 +34,7 @@ class LanguageModel:
             "openai/gpt-4o-mini", "openai/gpt-4o-mini-2024-07-18",
             "openai/gpt-4o", "openai/gpt-4o-2024-08-06", "openai/gpt-4o-2024-11-20",
             "openai/gpt-3.5-turbo",
+            "openai/gpt-5-2025-08-07",
             "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
             "meta-llama/Llama-3.3-70B-Instruct-Turbo",
             "openai/o3-mini", "openai/o3-mini-2025-01-31",

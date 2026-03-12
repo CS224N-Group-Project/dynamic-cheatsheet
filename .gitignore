@@ -167,3 +167,6 @@ config.env
 data/DataSIR/DataSIR.json
 !data/DataSIR/DataSIR.json.gz
 data/DataSIR/*.arrow
+
+# Large results folder — use results/DataSIR.tar.gz.part* to reconstruct
+results/DataSIR/

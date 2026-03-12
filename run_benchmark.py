@@ -324,6 +324,9 @@ def main(args: argparse.Namespace):
     if args.max_n_samples > 0:
         dataset = dataset.select(range(args.max_n_samples))
 
+    # Filter out examples with empty input fields (e.g. malformed entries in IneqMath_all)
+    dataset = dataset.filter(lambda x: x["input"] is not None and str(x["input"]).strip() != "")
+
     # Initialize the questions and the embeddings
     questions = None
     embeddings = None

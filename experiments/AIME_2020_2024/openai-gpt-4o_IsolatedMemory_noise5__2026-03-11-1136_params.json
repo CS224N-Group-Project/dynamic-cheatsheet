@@ -1,0 +1,22 @@
+{
+    "task": "AIME_2020_2024",
+    "approach_name": "IsolatedMemory",
+    "model_name": "openai/gpt-4o",
+    "generator_prompt_path": "prompts/generator_prompt.txt",
+    "cheatsheet_prompt_path": null,
+    "max_tokens": 2048,
+    "temperature": 0.0,
+    "max_num_rounds": 1,
+    "execute_python_code": true,
+    "initialize_cheatsheet_path": null,
+    "retrieve_top_k": 3,
+    "save_directory": "experiments",
+    "additional_flag_for_save_path": "_2026-03-11-1136",
+    "max_n_samples": -1,
+    "no_shuffle": false,
+    "prob": null,
+    "noise_n": 5,
+    "pregenerated_memory_path": null,
+    "memory_generator_prompt_path": "prompts/isolated_memory_generator_prompt.txt",
+    "run_timestamp": "2026-03-11-11-36"
+}

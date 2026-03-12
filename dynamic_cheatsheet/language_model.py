@@ -1,15 +1,20 @@
 import json
 import time
+from functools import partial
+from typing import List, Tuple
+
+import litellm
 import numpy as np
 import tiktoken
-from typing import List, Tuple
-from sklearn.metrics.pairwise import cosine_similarity
-from .utils.execute_code import extract_and_run_python_code
-from .utils.extractor import extract_answer, extract_cheatsheet, extract_all_memory_items, extract_memory_updates
-import litellm
-from litellm import completion, embedding as litellm_embedding
+from litellm import completion
+from litellm import embedding as litellm_embedding
 from litellm.exceptions import RateLimitError
-from functools import partial
+from sklearn.metrics.pairwise import cosine_similarity
+
+from .utils.execute_code import extract_and_run_python_code
+from .utils.extractor import (extract_all_memory_items, extract_answer,
+                              extract_cheatsheet, extract_memory_updates)
+
 litellm.drop_params = True
 
 class LanguageModel:
@@ -29,7 +34,6 @@ class LanguageModel:
 
         self.model_name = model_name
 
-        # Load the client for the model based on the model name
         if self.model_name in [
             "openai/gpt-4o-mini", "openai/gpt-4o-mini-2024-07-18",
             "openai/gpt-4o", "openai/gpt-4o-2024-08-06", "openai/gpt-4o-2024-11-20",
@@ -73,7 +77,6 @@ class LanguageModel:
         tokens = self.gpt4Tokenizer.encode(text)
         return len(tokens)
 
-    # Added By Jerry Gu
     def _embed_batch(self, texts: List[str]) -> List[List[float]]:
         """
         Embed a list of strings in a single API call.
@@ -90,11 +93,9 @@ class LanguageModel:
             model="openai/text-embedding-3-small",
             input=texts,
         )
-        # litellm returns data sorted by index; sort defensively anyway
         ordered = sorted(response.data, key=lambda d: d["index"])
         return [d["embedding"] for d in ordered]
 
-    # Added By Jerry Gu
     def _embed_text(self, text: str) -> List[float]:
         """
         Embed a single text string using OpenAI's text-embedding-3-small model.
@@ -111,7 +112,6 @@ class LanguageModel:
         )
         return response.data[0]["embedding"]
 
-    # Added By Jerry Gu
     def _retrieve_top_k_items(self, query_embedding: List[float], memory_store: List[dict], k: int) -> List[dict]:
         """
         Return the top-k memory items most similar to the query embedding.
@@ -131,7 +131,6 @@ class LanguageModel:
         similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
 
         # Blend cosine similarity with a log-count bonus so frequently-used items
-        # surface over untested ones with similar similarity scores.
         count_array = np.array([item.get("count", 1) for item in memory_store], dtype=float)
         max_count = max(float(count_array.max()), 1.0)
         count_bonus = np.log1p(count_array) / np.log1p(max_count)
@@ -193,7 +192,6 @@ class LanguageModel:
                 break
         return np.array(merged, dtype=int)
 
-    # Added By Jerry Gu
     def _retrieve_by_prob(self, query_embedding: List[float], memory_store: List[dict], prob: float) -> List[dict]:
         """
         Return memory items selected by softmax-weighted cumulative probability threshold.
@@ -205,7 +203,6 @@ class LanguageModel:
         embedding_matrix = np.array([item["embedding"] for item in memory_store])
         similarities = cosine_similarity([query_embedding], embedding_matrix)[0]
 
-        # Blend cosine similarity with a log-count bonus (same as _retrieve_top_k_items)
         count_array = np.array([item.get("count", 1) for item in memory_store], dtype=float)
         max_count = max(float(count_array.max()), 1.0)
         count_bonus = np.log1p(count_array) / np.log1p(max_count)
@@ -220,7 +217,6 @@ class LanguageModel:
         )
         return [memory_store[i] for i in selected_indices]
 
-    # Added By Jerry Gu — JSON Memory approach
     def _retrieve_dual_top_k(
         self,
         query_embedding: List[float],
@@ -315,22 +311,16 @@ class LanguageModel:
         else:
             raise RateLimitError("Max retries exceeded due to rate limiting.")
 
-        # If Python code execution is allowed, execute the code
         pre_code_execution_flag = output.split(code_execution_flag)[0].strip()
         if allow_code_execution and code_execution_flag in output and '```' == pre_code_execution_flag[-3:]:
             if code_execution_flag in output:
                 output_prefix = output.split(code_execution_flag)[0].strip()
             else:
-                # TODO (msuzgun): This is a temporary solution. We may want to find a better way to handle this.
                 output_prefix = output
             executed_code = extract_and_run_python_code(output_prefix)
             executed_code = executed_code.strip()
             current_output = f"{output_prefix}\n{code_execution_flag}\n\n{executed_code}"
             final_output = f"{final_output}\n\n{current_output}".strip()
-            # import pdb; pdb.set_trace()
-            # print(f"*** This code has been executed:\n{executed_code}\n\n")
-            # print(f"***And the output is:\n{current_output}")
-            # If the current depth is less than or equal to the maximum depth, add a new message to the history
             if current_depth <= max_depth_num_rounds:
                 warning_txt = ""
                 if current_depth == max_depth_num_rounds:
@@ -354,17 +344,9 @@ class LanguageModel:
                 final_output = f"{final_output}\n\n{current_output}".strip()
                 return final_output
         else:
-            # If code execution is not allowed or no code block is found, return the final output
-            # Add the output to the final output
             final_output = f"{final_output}\n\n{output}".strip()
             return final_output
 
-    # TODO: Need to add a retrieval mechamism for specific memory's in the cheatsheet
-    # Part 1: retrieve top k strategies from cheatsheet during generation and pass to generator (we only need new embedding)
-    # Part 2: decide whether a new strategy is needed or if an existing strategy needs to be fixed, or if nothing is needed. Then,
-    #         have a curator create a new <memory> item for each chage needed in a separate call (limit to k calls)
-    #         and then repeat
-    # 
     def advanced_generate(self,
         approach_name: str,
         input_txt: str,
@@ -410,7 +392,6 @@ class LanguageModel:
             ValueError : If the proper templates are not provided.
         """
 
-        # If the approach name is "default", run the generator model with the input text and the current cheatsheet
         if approach_name == "default":
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", "(empty)")
             generator_history = [
@@ -459,10 +440,8 @@ class LanguageModel:
             generator_output = ''
 
             for round in range(max(1, max_num_rounds)):
-                ## STEP 1: Run the generator model with the input text and the cheatsheet
                 generator_cheatsheet_content = cheatsheet
 
-                # If there are previous answers, add them to the cheatsheet content for the generator
                 if round > 0 and add_previous_answers_to_cheatsheet:
                     previous_answers_txt = f"PREVIOUS ANSWERS:\n{'; '.join(previous_answers)}"
                     generator_cheatsheet_content = f"{generator_cheatsheet_content}\n\n{previous_answers_txt}"
@@ -470,9 +449,7 @@ class LanguageModel:
                 generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", generator_cheatsheet_content)
                 current_cheatsheet = cheatsheet
 
-                # Prepare the message history for the generator model
                 generator_history = [{"role": "user", "content": generator_prompt}]
-                # Run the generator model
                 generator_output = self.generate(
                     history=generator_history,
                     temperature=temperature,
@@ -480,10 +457,8 @@ class LanguageModel:
                     allow_code_execution=allow_code_execution,
                     code_execution_flag=code_execution_flag,
                 )
-                # Extract the output from the generator model
                 generator_answer = extract_answer(generator_output)
 
-                ## STEP 2: Run the cheatsheet extraction model with the generator output and the current cheatsheet
                 cheatsheet_prompt = cheatsheet_template.replace("[[QUESTION]]", input_txt).replace("[[MODEL_ANSWER]]", generator_output).replace("[[PREVIOUS_CHEATSHEET]]", current_cheatsheet)
 
                 cheatsheet_history = [{"role": "user", "content": cheatsheet_prompt}]
@@ -494,7 +469,6 @@ class LanguageModel:
                     allow_code_execution=False,
                 )
 
-                # Extract the new cheatsheet from the output (if present); otherwise, return the old cheatsheet
                 new_cheatsheet = extract_cheatsheet(response=cheatsheet_output, old_cheatsheet=current_cheatsheet)
                 cheatsheet = new_cheatsheet
 
@@ -532,7 +506,6 @@ class LanguageModel:
                 top_k_original_outputs = []
                 curated_cheatsheet = "(empty)"
             
-            # Replace the relevant placeholders in the generator template with the input text and the curated cheatsheet and then run the generator model
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", curated_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
@@ -542,7 +515,6 @@ class LanguageModel:
                     allow_code_execution=allow_code_execution,
                     code_execution_flag=code_execution_flag,
                 )
-            # Extract the answer from the generator model
             generator_answer = extract_answer(generator_output)
 
             return {
@@ -564,18 +536,15 @@ class LanguageModel:
                 "final_cheatsheet": curated_cheatsheet,
             }
         elif approach_name in ["Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis"]:
-            # Get the current original input embedding
             current_original_input_embedding = original_input_embeddings[-1] # Current original input embedding
             prev_original_input_embeddings = original_input_embeddings[:-1] # Note that this can be empty
             
-            # Retrieve the most similar k input-output pairs from the previous inputs and outputs
             if len(prev_original_input_embeddings) > 0:
                 similarities = cosine_similarity([current_original_input_embedding], prev_original_input_embeddings)
                 top_k_indices = np.argsort(similarities[0])[::-1][:retrieve_top_k]
                 top_k_original_inputs = [original_input_corpus[i] for i in top_k_indices]
                 top_k_original_outputs = [generator_outputs_so_far[i] for i in top_k_indices]
                 top_k_similar_values = similarities[0][top_k_indices]
-                # Use the retrieved pairs to curate the cheatsheet for the generator model
                 curated_cheatsheet = "### PREVIOUS SOLUTIONS (START)\n\nNote: The input-output pairs listed below are taken from previous test cases and are meant to assist you in understanding potential solution strategies or tool usages. While they can offer insight and inspiration, they should not be blindly copied, as they may contain errors or may not fit your specific use case. Approach them with a critical mindset—analyze their logic, verify their correctness, and adapt them as needed. Your goal should be to develop a well-reasoned solution that best addresses the problem at hand.\n\n"
             else:
                 top_k_original_inputs = []
@@ -583,23 +552,18 @@ class LanguageModel:
                 top_k_similar_values = []
                 curated_cheatsheet = '(empty)'
             
-            # The following only adds the previous input-output pairs to the cheatsheet
             for i, (previous_input_txt, previous_output_txt, similarity) in enumerate(zip(top_k_original_inputs[::-1], top_k_original_outputs[::-1], top_k_similar_values[::-1])):
                 curated_cheatsheet += f"#### Previous Input #{i+1} (Similarity: {similarity:.2f}):\n\n{previous_input_txt}\n\n#### Model Solution to Previous Input  #{i+1}:\n\n{previous_output_txt}\n---\n---\n\n"
             curated_cheatsheet = curated_cheatsheet.strip()
             
-            # If it is empty, we should not add the "PREVIOUS SOLUTIONS (END)" to the cheatsheet
             if curated_cheatsheet != '(empty)':
                 curated_cheatsheet += "\n\n#### PREVIOUS SOLUTIONS (END)"
 
-            # Run the Generator model with the input text and the curated cheatsheet (input-output pairs) to generate a better (more tailored) cheatsheet   
             previous_cheatsheet = cheatsheet
             if approach_name == "DynamicCheatsheet_RetrievalSynthesis":
-                # First, we need to make the necessary replacements in the cheatsheet template
                 cheatsheet_prompt = cheatsheet_template.replace("[[PREVIOUS_INPUT_OUTPUT_PAIRS]]", curated_cheatsheet)
                 cheatsheet_prompt = cheatsheet_prompt.replace("[[NEXT_INPUT]]", input_txt)
                 cheatsheet_prompt = cheatsheet_prompt.replace("[[PREVIOUS_CHEATSHEET]]", previous_cheatsheet)
-                # Now, we are ready to run the cheatsheet curator model
                 cheatsheet_history = [{"role": "user", "content": cheatsheet_prompt}]
                 cheatsheet_output = self.generate(
                     history=cheatsheet_history,
@@ -607,11 +571,9 @@ class LanguageModel:
                     max_tokens=2*max_tokens,
                     allow_code_execution=False,
                 )
-                # Finally, extract the new cheatsheet from the output (if present); otherwise, return the old cheatsheet
                 new_cheatsheet = extract_cheatsheet(response=cheatsheet_output, old_cheatsheet=curated_cheatsheet)
                 curated_cheatsheet = new_cheatsheet
 
-            # Replace the relevant placeholders in the generator template with the input text and the curated cheatsheet and then run the generator model
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", curated_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
@@ -621,7 +583,6 @@ class LanguageModel:
                     allow_code_execution=allow_code_execution,
                     code_execution_flag=code_execution_flag,
                 )
-            # Extract the answer from the generator model
             generator_answer = extract_answer(generator_output)
 
             return {
@@ -642,8 +603,7 @@ class LanguageModel:
                 "final_output": generator_output,
                 "final_cheatsheet": curated_cheatsheet,
             }
-        elif approach_name == "DynamicCheatsheet_StrategicChunkRetrieval":       # Added By Jerry Gu
-            # Deserialize memory store from cheatsheet param
+        elif approach_name == "DynamicCheatsheet_StrategicChunkRetrieval":       
             if cheatsheet is None or cheatsheet == "(empty)":
                 memory_store = []
             else:
@@ -652,14 +612,12 @@ class LanguageModel:
                 except Exception:
                     memory_store = []
 
-            # Step 1: Retrieve relevant memory items via cosine similarity
             query_embedding = self._embed_text(input_txt)
             if retrieve_prob is not None:
                 retrieved_items = self._retrieve_by_prob(query_embedding, memory_store, retrieve_prob)
             else:
                 retrieved_items = self._retrieve_top_k_items(query_embedding, memory_store, retrieve_top_k)
 
-            # Increment count for each retrieved item so usage frequency is tracked
             retrieved_ids_set = {item["id"] for item in retrieved_items}
             for ms_item in memory_store:
                 if ms_item["id"] in retrieved_ids_set:
@@ -667,7 +625,6 @@ class LanguageModel:
 
             retrieved_cheatsheet = "\n\n".join(item["text"] for item in retrieved_items) if retrieved_items else "(empty)"
 
-            # Step 2: Generate — exactly like DC-Cumulative, retrieved items serve as the cheatsheet
             generator_prompt = generator_template.replace("[[QUESTION]]", input_txt).replace("[[CHEATSHEET]]", retrieved_cheatsheet)
             generator_history = [{"role": "user", "content": generator_prompt}]
             generator_output = self.generate(
@@ -679,8 +636,6 @@ class LanguageModel:
             )
             generator_answer = extract_answer(generator_output)
 
-            # Step 3: Curator — exactly like DC-Cumulative, but on the K retrieved items only
-            # [[PREVIOUS_CHEATSHEET]] = the K retrieved items, [[QUESTION]] and [[MODEL_ANSWER]] same as DC-Cumulative
             curator_prompt = cheatsheet_template.replace("[[PREVIOUS_CHEATSHEET]]", retrieved_cheatsheet).replace("[[QUESTION]]", input_txt).replace("[[MODEL_ANSWER]]", generator_output)
             curator_history = [{"role": "user", "content": curator_prompt}]
             curator_output = self.generate(
@@ -690,11 +645,9 @@ class LanguageModel:
                 allow_code_execution=False,
             )
 
-            # Extract improved cheatsheet and parse individual memory items from it
             new_curator_cheatsheet = extract_cheatsheet(response=curator_output, old_cheatsheet=retrieved_cheatsheet)
             new_items_text = extract_all_memory_items(new_curator_cheatsheet)
 
-            # Remove the K retrieved items from the memory store, add the curator-improved items
             retrieved_ids = {item["id"] for item in retrieved_items}
             memory_store = [item for item in memory_store if item["id"] not in retrieved_ids]
             next_id = max((item["id"] for item in memory_store), default=-1) + 1
@@ -708,9 +661,6 @@ class LanguageModel:
                 })
                 next_id += 1
 
-            # Serialize two versions of the memory store:
-            # - final_cheatsheet: text-only JSON (no embeddings) — saved to JSONL
-            # - final_cheatsheet_with_embeddings: full JSON with embeddings — in-memory carry-forward only
             memory_store_clean = [{"id": item["id"], "text": item["text"], "source_input": item["source_input"], "count": item["count"]} for item in memory_store]
             new_cheatsheet = json.dumps(memory_store_clean)
             new_cheatsheet_with_embeddings = json.dumps(memory_store)
@@ -730,15 +680,12 @@ class LanguageModel:
                 ],
                 "final_answer": generator_answer,
                 "final_output": generator_output,
-                "final_cheatsheet": new_cheatsheet,                               # text-only — saved to JSONL
-                "final_cheatsheet_with_embeddings": new_cheatsheet_with_embeddings,  # popped by run_benchmark, never saved
+                "final_cheatsheet": new_cheatsheet,                               
+                "final_cheatsheet_with_embeddings": new_cheatsheet_with_embeddings, 
                 "memory_store_text": memory_store_text,
                 "memory_store_size": len(memory_store),
             }
-        elif approach_name == "DynamicCheatsheet_JSON_Memory":       # Added By Jerry Gu
-            # --- Deserialize memory store ---
-            # cheatsheet on disk is a JSON array of {unique_id, strategy, example_problem}.
-            # In-memory it additionally carries strategy_embedding and problem_embedding.
+        elif approach_name == "DynamicCheatsheet_DynamicLedger":     
             if cheatsheet is None or cheatsheet == "(empty)":
                 memory_store = []
             else:

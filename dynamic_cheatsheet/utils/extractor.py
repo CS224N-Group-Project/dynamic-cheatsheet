@@ -107,10 +107,10 @@ def extract_all_memory_items(text: str) -> list:
     return items
 
 
-# Added by Jerry Gu — JSON Memory approach
+# Added by Jerry Gu — DynamicLedger approach
 def extract_memory_updates(response: str) -> list:
     """
-    Parses curator output for DynamicCheatsheet_JSON_Memory.
+    Parses curator output for DynamicCheatsheet_DynamicLedger.
 
     Extracts the JSON array inside <memory_updates>...</memory_updates> tags and
     returns it as a list of operation dicts.  Each valid dict must have an

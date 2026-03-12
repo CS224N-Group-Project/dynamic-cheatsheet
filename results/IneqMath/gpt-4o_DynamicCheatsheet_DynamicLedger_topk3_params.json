@@ -1,8 +1,8 @@
 {
     "task": "IneqMath",
-    "approach_name": "DynamicCheatsheet_JSON_Memory",
+    "approach_name": "DynamicCheatsheet_DynamicLedger",
     "model_name": "openai/gpt-4o",
-    "generator_prompt_path": "prompts/generator_prompt_json_memory.txt",
+    "generator_prompt_path": "prompts/generator_prompt_dynamic_ledger.txt",
     "cheatsheet_prompt_path": null,
     "max_tokens": 4096,
     "temperature": 0.0,

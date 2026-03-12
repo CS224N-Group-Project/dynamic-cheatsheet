@@ -14,7 +14,7 @@ This repository extends the original DC framework with two new memory architectu
 
 ### 1. Dynamic Ledger — Structured, Individually Addressable Strategy Store
 
-We introduce **DynamicCheatsheet_JSON_Memory** (the Dynamic Ledger), a new cheatsheet variant that replaces the flat text cheatsheet with a structured JSON store of individually addressable strategy entries.
+We introduce **DynamicCheatsheet_DynamicLedger** (the Dynamic Ledger), a new cheatsheet variant that replaces the flat text cheatsheet with a structured JSON store of individually addressable strategy entries.
 
 **How it works:**
 - The **generator** embeds the current problem and retrieves the top-*k* most relevant strategy entries from the ledger via cosine similarity.
@@ -29,10 +29,10 @@ We introduce **DynamicCheatsheet_JSON_Memory** (the Dynamic Ledger), a new cheat
 ```bash
 python3 run_benchmark.py \
   --task IneqMath_all \
-  --approach_name DynamicCheatsheet_JSON_Memory \
+  --approach_name DynamicCheatsheet_DynamicLedger \
   --model_name openai/gpt-4o \
-  --generator_prompt_path prompts/generator_prompt_json_memory.txt \
-  --cheatsheet_prompt_path prompts/curator_prompt_json_memory.txt \
+  --generator_prompt_path prompts/generator_prompt_dynamic_ledger.txt \
+  --cheatsheet_prompt_path prompts/curator_prompt_dynamic_ledger.txt \
   --retrieve_top_k 3 \
   --max_n_samples 600
 ```
@@ -115,7 +115,7 @@ python3 run_benchmark.py \
 | `Dynamic_Retrieval` | Retrieve top-*k* chunks, no curation step |
 | `FullHistoryAppending` | Full conversation history appended as context |
 | `DynamicCheatsheet_StrategicChunkRetrieval` | **[NEW]** Retrieve top-*k* strategy chunks; curator refines only those chunks |
-| `DynamicCheatsheet_JSON_Memory` | **[NEW]** Dynamic Ledger — structured JSON store with per-entry CRUD updates |
+| `DynamicCheatsheet_DynamicLedger` | **[NEW]** Dynamic Ledger — structured JSON store with per-entry CRUD updates |
 
 
 
@@ -154,13 +154,13 @@ from dynamic_cheatsheet.language_model import LanguageModel
 model = LanguageModel(model_name="openai/gpt-4o")
 
 # Dynamic Ledger
-with open("prompts/generator_prompt_json_memory.txt") as f:
+with open("prompts/generator_prompt_dynamic_ledger.txt") as f:
     generator_prompt = f.read()
-with open("prompts/curator_prompt_json_memory.txt") as f:
+with open("prompts/curator_prompt_dynamic_ledger.txt") as f:
     curator_prompt = f.read()
 
 results = model.advanced_generate(
-    approach_name="DynamicCheatsheet_JSON_Memory",  # Dynamic Ledger
+    approach_name="DynamicCheatsheet_DynamicLedger",  # Dynamic Ledger
     input_txt="<your question>",
     cheatsheet="(empty)",
     generator_template=generator_prompt,
@@ -181,10 +181,10 @@ python3 run_benchmark.py --task IneqMath_all --approach_name default \
 
 # Dynamic Ledger (our method)
 python3 run_benchmark.py --task IneqMath_all \
-    --approach_name DynamicCheatsheet_JSON_Memory \
+    --approach_name DynamicCheatsheet_DynamicLedger \
     --model_name openai/gpt-4o \
-    --generator_prompt_path prompts/generator_prompt_json_memory.txt \
-    --cheatsheet_prompt_path prompts/curator_prompt_json_memory.txt \
+    --generator_prompt_path prompts/generator_prompt_dynamic_ledger.txt \
+    --cheatsheet_prompt_path prompts/curator_prompt_dynamic_ledger.txt \
     --retrieve_top_k 3 --max_n_samples 600
 
 # Strategic Chunk Retrieval

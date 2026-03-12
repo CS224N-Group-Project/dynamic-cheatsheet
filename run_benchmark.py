@@ -179,7 +179,7 @@ def main(args: argparse.Namespace):
     # Read the prompt files
     args.generator_prompt = read_file(args.generator_prompt_path)
     _DEFAULT_CURATOR_PROMPTS = {
-        "DynamicCheatsheet_JSON_Memory": "prompts/curator_prompt_json_memory.txt",
+        "DynamicCheatsheet_DynamicLedger": "prompts/curator_prompt_dynamic_ledger.txt",
     }
     if args.cheatsheet_prompt_path:
         args.cheatsheet_prompt = read_file(args.cheatsheet_prompt_path)
@@ -214,7 +214,7 @@ def main(args: argparse.Namespace):
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
     
     # Build the deterministic save path (always, up front)
-    _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval", "DynamicCheatsheet_JSON_Memory"}
+    _retrieval_approaches = {"Dynamic_Retrieval", "DynamicCheatsheet_RetrievalSynthesis", "DynamicCheatsheet_StrategicChunkRetrieval", "DynamicCheatsheet_DynamicLedger"}
     retrieval_tag = ""
     if args.approach_name in _retrieval_approaches:
         retrieval_tag = f"_prob{args.prob}" if args.prob is not None else f"_topk{args.retrieve_top_k}"
@@ -288,14 +288,14 @@ def main(args: argparse.Namespace):
                     _item["embedding"] = model._embed_text(_item["text"])
                 cheatsheet = json.dumps(_resume_store)
 
-        # Re-embed memory store on resume for JSON Memory (two embeddings per item: strategy + problem)
-        elif args.approach_name == "DynamicCheatsheet_JSON_Memory" and cheatsheet not in (None, "(empty)"):
+        # Re-embed memory store on resume for DynamicLedger (two embeddings per item: strategy + problem)
+        elif args.approach_name == "DynamicCheatsheet_DynamicLedger" and cheatsheet not in (None, "(empty)"):
             try:
                 _resume_store = json.loads(cheatsheet)
             except Exception:
                 _resume_store = []
             if _resume_store:
-                print(f"Re-embedding {len(_resume_store)} memory items for resume (JSON Memory)...")
+                print(f"Re-embedding {len(_resume_store)} memory items for resume (DynamicLedger)...")
                 # Batch all texts in one API call: [strategy_0, problem_0, strategy_1, problem_1, ...]
                 _all_texts = []
                 for _item in _resume_store:
@@ -450,13 +450,13 @@ def main(args: argparse.Namespace):
 
         ## FOR DEBUGGING PURPOSES
         # import pdb; pdb.set_trace()
-        if args.approach_name == "DynamicCheatsheet_JSON_Memory" and output_dict.get("steps"):
+        if args.approach_name == "DynamicCheatsheet_DynamicLedger" and output_dict.get("steps"):
             _step = output_dict["steps"][0]
             _ops  = _step.get("operations_applied", [])
             _n_create = sum(1 for o in _ops if o.get("operation") == "create")
             _n_update = sum(1 for o in _ops if o.get("operation") == "update")
             _n_delete = sum(1 for o in _ops if o.get("operation") == "delete")
-            print(f"@ JSON MEMORY — Operations: {_n_create} create | {_n_update} update | {_n_delete} delete  "
+            print(f"@ DYNAMIC LEDGER — Operations: {_n_create} create | {_n_update} update | {_n_delete} delete  "
                   f"(store size: {output_dict.get('memory_store_size', '?')})")
             print(f"@ MEMORY STORE (strategies):\n{output_dict.get('memory_store_text', '(empty)')}")
         else:

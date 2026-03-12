@@ -170,3 +170,4 @@ data/DataSIR/*.arrow
 
 # Large results folder — use results/DataSIR.tar.gz.part* to reconstruct
 results/DataSIR/
+results/DataSIR400/

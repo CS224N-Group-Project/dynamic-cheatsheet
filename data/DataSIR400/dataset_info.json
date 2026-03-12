@@ -1,0 +1,28 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "input": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "target": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "original_data": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "encoding_method": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "data_type": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}

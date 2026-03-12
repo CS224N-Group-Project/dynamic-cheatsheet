@@ -206,7 +206,7 @@ def main(args: argparse.Namespace):
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
-    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all", "DataSIR"]:
+    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev", "IneqMath_all", "DataSIR", "DataSIR400"]:
         if args.task == "DataSIR" and not os.path.exists("data/DataSIR/data-00000-of-00001.arrow"):
             _build_datasir_from_gz()
         dataset = load_from_disk(f"data/{args.task}")
@@ -386,7 +386,7 @@ def main(args: argparse.Namespace):
                 input = f"{input}\n\nChoices:\n{choices_str}\n\n(Select the correct relation from the choices above. State your final answer as the choice letter, e.g. (A).)"
             else:
                 input = f"{input}\n\n(Provide your final answer as the exact value of the constant, e.g. C = 4.)"
-        elif args.task == "DataSIR":
+        elif args.task in ["DataSIR", "DataSIR400"]:
             from dynamic_cheatsheet.utils.evaluation import DATASIR_CATEGORIES
             categories_str = ", ".join(DATASIR_CATEGORIES)
             input = (
@@ -479,7 +479,7 @@ def main(args: argparse.Namespace):
             problem_type = dataset[idx]["type"]
             choices_json = dataset[idx]["choices"]
             result = eval_for_ineqmath(problem_type, final_answer, original_target, choices_json, args.model_name)
-        elif args.task == "DataSIR":
+        elif args.task in ["DataSIR", "DataSIR400"]:
             result = eval_for_datasir(final_answer, original_target)
         else:
             raise ValueError(f"Task {args.task} not supported.")

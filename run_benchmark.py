@@ -184,7 +184,7 @@ def main(args: argparse.Namespace):
     if args.task in PREDEFINED_PROMPTS and args.task != "P3_Test":
         dataset = load_dataset("turingmachine/meta-prompting")
         dataset = dataset[args.task]
-    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev"]:
+    elif args.task in ["GPQA_Diamond", "AIME_2020_2024", "AIME_2024", "AIME_2025", "AIME_2021_2025", "MMLU_Pro_Physics", "MMLU_Pro_Engineering", "MathEquationBalancer", "IneqMath", "IneqMath_test", "IneqMath_dev"]:
         dataset = load_from_disk(f"data/{args.task}")
     else:
         raise ValueError(f"Task {args.task} is not recognized. Please make sure the task name is correct.")
@@ -325,14 +325,27 @@ def main(args: argparse.Namespace):
         # Build the full list of formatted questions and their targets (same formatting as the eval loop)
         all_formatted_questions = []
         all_targets = []
+        all_solutions = []
         for _qi, _example in enumerate(dataset):
             _orig = _example["input"]
             _target = str(dataset[_qi]["target"])
+            # Try to fetch a reference solution if available (e.g., AIME_2024, AIME_2021_2025)
+            _solution = ""
+            if args.task in ("AIME_2024", "AIME_2021_2025"):
+                try:
+                    _meta = _example.get("metadata", None)
+                    if isinstance(_meta, dict) and "Solution" in _meta:
+                        _solution = str(_meta.get("Solution") or "")
+                    elif "Solution" in _example:
+                        _solution = str(_example.get("Solution") or "")
+                except Exception:
+                    _solution = ""
+
             if args.task in PREDEFINED_PROMPTS:
                 _q = f"{PREDEFINED_PROMPTS[args.task]}\n\nQuestion #{_qi+1}:\n{_orig}"
             else:
                 _q = f"Question #{_qi+1}:\n{_orig}"
-            if args.task in ("AIME_2020_2024", "AIME_2024", "AIME_2025"):
+            if args.task in ("AIME_2020_2024", "AIME_2024", "AIME_2025", "AIME_2021_2025"):
                 _q = f"{_q} (Please provide your answer in the form of an integer, e.g., 1234, with no Markdown formatting or additional text; make sure to pay attention to the desired format of the final answer though.)"
             elif args.task == "MathEquationBalancer":
                 _q = f"Below is an equation with missing operators. Your task is to fill in the blanks with the correct mathematical operators: +, -, *, or /. Ensure that the equation is correct once the operators are added. The operators should be placed in the sequence they appear from left to right. Include the full equation with the operators filled in. For instance, for the equation 1 ? 2 ? 3 = 6, the correct answer is 1 + 2 + 3 = 6.\n\nEquation: {_q}"
@@ -348,16 +361,25 @@ def main(args: argparse.Namespace):
                     _q = f"{_q}\n\n(Provide your final answer as the exact value of the constant, e.g. C = 4.)"
             all_formatted_questions.append(_q)
             all_targets.append(_target)
+            all_solutions.append(_solution)
             if args.max_n_samples > 0 and _qi == args.max_n_samples - 1:
                 break
 
         # Generate missing memory items
-        missing = [(q, t) for q, t in zip(all_formatted_questions, all_targets) if q not in pregenerated_memory_items]
+        missing = [
+            (q, t, s)
+            for q, t, s in zip(all_formatted_questions, all_targets, all_solutions)
+            if q not in pregenerated_memory_items
+        ]
         if missing:
             print(f"Generating memory items for {len(missing)} questions...")
-            for _mi, (_q, _t) in enumerate(missing):
+            for _mi, (_q, _t, _s) in enumerate(missing):
                 print(f"  Pre-generating memory item {_mi+1}/{len(missing)}...")
-                mem_prompt = args.memory_generator_prompt.replace("[[QUESTION]]", _q).replace("[[ANSWER]]", _t)
+                mem_prompt = (
+                    args.memory_generator_prompt.replace("[[QUESTION]]", _q)
+                    .replace("[[ANSWER]]", _t)
+                    .replace("[[SOLUTION]]", _s)
+                )
                 mem_output = model.generate(
                     history=[{"role": "user", "content": mem_prompt}],
                     temperature=args.temperature,
@@ -366,7 +388,16 @@ def main(args: argparse.Namespace):
                 )
                 mem_cheatsheet = extract_cheatsheet(mem_output, old_cheatsheet="(empty)")
                 mem_items = extract_all_memory_items(mem_cheatsheet)
-                pregenerated_memory_items[_q] = "\n\n".join(mem_items) if mem_items else mem_cheatsheet
+                _final_mem = "\n\n".join(mem_items) if mem_items else mem_cheatsheet
+                pregenerated_memory_items[_q] = _final_mem
+
+                # Debugging: print the generated memory item for inspection
+                print("----- GENERATED MEMORY ITEM START -----")
+                print(f"Question index: {_mi+1}/{len(missing)}")
+                print(f"Task: {args.task}")
+                print(f"Question preview: {_q[:200]}...")
+                print(_final_mem)
+                print("----- GENERATED MEMORY ITEM END -----")
 
             with open(memory_path, "w") as f:
                 json.dump(pregenerated_memory_items, f, indent=2)
@@ -389,7 +420,7 @@ def main(args: argparse.Namespace):
 
         previous_inputs.append(input)
 
-        if args.task == "AIME_2020_2024" or args.task == "AIME_2024" or args.task == "AIME_2025":
+        if args.task in ("AIME_2020_2024", "AIME_2024", "AIME_2025", "AIME_2021_2025"):
             # Add a specific format to the input for the AIME tasks
             input = f"{input} (Please provide your answer in the form of an integer, e.g., 1234, with no Markdown formatting or additional text; make sure to pay attention to the desired format of the final answer though.)"
         elif args.task == "MathEquationBalancer":
@@ -470,7 +501,7 @@ def main(args: argparse.Namespace):
 
         if args.task == "GameOf24":
             result = eval_for_GameOf24(original_input, final_answer)
-        elif args.task in ["AIME_2025", "AIME_2024", "AIME_2020_2024"]:
+        elif args.task in ["AIME_2025", "AIME_2024", "AIME_2020_2024", "AIME_2021_2025"]:
             result = eval_for_exact_matching_with_no_punctuation(final_answer.lower(), original_target.lower())
         elif args.task in ["GPQA_Diamond", "MMLU_Pro_Engineering", "MMLU_Pro_Physics"]:
             result = eval_for_multiple_choice(input, final_answer, original_target)

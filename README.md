@@ -220,8 +220,3 @@ Results are saved to `experiments/<task>/<provider>/<model>_<approach>_topk<k>.j
 
 ---
 
-## Original Paper
-
-This repository builds on the original Dynamic Cheatsheet framework. If you use this codebase, please cite:
-
-
